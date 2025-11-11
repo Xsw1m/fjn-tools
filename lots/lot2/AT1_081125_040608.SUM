@@ -1,0 +1,10 @@
+TotalPass: 100
+TotalFail: 18
+Pass_Yield: xxx (不需要考虑)
+********* Site Total Summary ******************
+Software   Hardware     COUNT       XXX 
+  Category   BIN
+        1          5        1       XXX 
+        2          1        2       XXX 
+        3          4        3       XXX 
+        x          x        x       xxx

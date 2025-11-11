@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+
+# Virtual env
+.venv/
+
+# Django
+server/db.sqlite3
+uploads/
+exports/
+result.xlsx
+
+# Build/Release
+dist/
+
+# Node/Vite (if present)
+node_modules/
+client/node_modules/
+client/.vite/
+client/.cache/
+
+# Env/Tools
+.env
+.coverage
+.pytest_cache/

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SUM Aggregator 前端</title>
+    <style>
+      :root { --primary: #2563eb; --gray:#6b7280; }
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', Arial, sans-serif; padding: 24px; background:#fafafa; }
+      .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; max-width: 720px; margin: 0 auto; background:white; box-shadow: 0 6px 16px rgba(0,0,0,0.06); }
+      h2 { margin: 0 0 8px; }
+      p { margin: 0 0 16px; color:#374151; }
+      label { display:block; font-weight:600; margin-bottom: 6px; }
+      .row { display:flex; gap:10px; align-items:center; }
+      input[type=text] { flex:1; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; }
+      input[type=text]:focus { outline:none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+      button { padding:10px 14px; border:none; border-radius:8px; background:var(--primary); color:white; cursor:pointer; font-size:14px; transition: transform .06s ease; }
+      button:hover { transform: translateY(-1px); }
+      button:disabled { opacity:.6; cursor:not-allowed; }
+      .status { margin-top:12px; color:#111827; min-height: 20px; }
+      .link a { color: var(--primary); text-decoration: none; }
+      .link a:hover { text-decoration: underline; }
+    </style>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="text/babel">
+      const { useState } = React;
+
+      function App() {
+        const [path, setPath] = useState('/Users/admin/Desktop/fjn-tools/lots');
+        const [showPicker, setShowPicker] = useState(false);
+        const [browsePath, setBrowsePath] = useState('/Users/admin/Desktop/fjn-tools/lots');
+        const [entries, setEntries] = useState([]);
+        const [loading, setLoading] = useState(false);
+        const [status, setStatus] = useState('');
+        const [downloadUrl, setDownloadUrl] = useState('');
+
+        const run = async () => {
+          if (!path || !path.trim()) {
+            setStatus('请先填写 lots 目录路径');
+            return;
+          }
+          setLoading(true);
+          setStatus('正在生成 xlsx ...');
+          setDownloadUrl('');
+          try {
+            const res = await fetch('/api/sum/run', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lots_dir: path })
+            });
+            const data = await res.json();
+            if (data.ok) {
+              setStatus(`生成成功：${data.filename}`);
+              setDownloadUrl(data.download_url);
+            } else {
+              setStatus('生成失败：' + (data.error || '未知错误'));
+            }
+          } catch (e) {
+            setStatus('生成失败：' + e.message);
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        const useDefault = () => {
+          setPath('/Users/admin/Desktop/fjn-tools/lots');
+          setStatus('已填充默认 lots 路径');
+          setDownloadUrl('');
+        };
+
+        const loadDir = async (p) => {
+          try {
+            const res = await fetch(`/api/fs/list?path=${encodeURIComponent(p)}`);
+            const data = await res.json();
+            if (data.ok) {
+              setBrowsePath(data.path);
+              setEntries(data.children || []);
+            } else {
+              setStatus('浏览失败：' + (data.error || '未知错误'));
+            }
+          } catch (e) {
+            setStatus('浏览失败：' + e.message);
+          }
+        };
+
+        const openPicker = async () => {
+          setShowPicker(true);
+          setStatus('');
+          await loadDir(path);
+        };
+
+        const goUp = async () => {
+          const idx = browsePath.lastIndexOf('/');
+          if (idx > 0) {
+            await loadDir(browsePath.slice(0, idx));
+          }
+        };
+
+        const chooseCurrent = () => {
+          setPath(browsePath);
+          setShowPicker(false);
+          setStatus('已选择路径');
+          setDownloadUrl('');
+        };
+
+        return (
+          <div className="card">
+            <h2>SUM Aggregator</h2>
+            <p>输入 lots 目录路径，点击生成 xlsx。会自动避免重名（如 result(1).xlsx）。</p>
+            <label htmlFor="lotsPath">lots 路径</label>
+            <div className="row">
+              <input id="lotsPath" type="text" value={path} onChange={e => setPath(e.target.value)} placeholder="/Users/admin/Desktop/fjn-tools/lots" />
+              <button onClick={useDefault} disabled={loading} title="填充默认路径">默认</button>
+              <button onClick={openPicker} disabled={loading} title="从服务器浏览并选择">选择</button>
+              <button onClick={run} disabled={loading}>生成 xlsx</button>
+            </div>
+            <div className="status">{status}</div>
+            {downloadUrl && <div className="link"><a href={downloadUrl} target="_blank" rel="noreferrer">另存为</a></div>}
+            {showPicker && (
+              <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.35)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <div style={{background:'#fff',borderRadius:12,padding:16,width:'680px',maxHeight:'70vh',boxShadow:'0 10px 30px rgba(0,0,0,.15)'}}>
+                  <h3 style={{marginTop:0}}>选择服务器目录</h3>
+                  <p style={{color:'#374151',margin:'4px 0 12px'}}>仅浏览项目根目录内的路径。</p>
+                  <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:8}}>
+                    <input type="text" value={browsePath} readOnly style={{flex:1,padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:8}} />
+                    <button onClick={goUp} className="secondary">上一级</button>
+                    <button onClick={chooseCurrent}>选择当前路径</button>
+                    <button onClick={() => setShowPicker(false)} className="secondary">关闭</button>
+                  </div>
+                  <div style={{borderTop:'1px solid #eee',paddingTop:8,overflow:'auto',maxHeight:'45vh'}}>
+                    {entries.map((it, i) => (
+                      <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0'}}>
+                        <span>{it.is_dir ? '📁' : '📄'} {it.name}</span>
+                        <div style={{display:'flex',gap:8}}>
+                          {it.is_dir && (<button className="secondary" onClick={() => loadDir(it.path)}>进入</button>)}
+                          {it.is_dir && (<button onClick={() => {setBrowsePath(it.path); setPath(it.path); setShowPicker(false); setStatus('已选择路径'); setDownloadUrl('');}}>选择</button>)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById('app')).render(<App/>);
+    </script>
+  </body>
+  </html>
