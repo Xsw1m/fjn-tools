@@ -24,124 +24,7 @@ except Exception:
     sa = None
 
 
-def index(_request):
-    """返回一个简易 React 页面，支持选择 lots 目录并生成 xlsx。"""
-    html = """
-    <!doctype html>
-    <html lang="zh-CN">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>SUM Aggregator 网页版</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', Arial, sans-serif; padding: 24px; }
-          .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px; max-width: 980px; margin: 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-          .row { display: flex; gap: 8px; align-items: center; }
-          input[type=text] { flex: 1; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
-          button { padding: 8px 12px; border: none; border-radius: 6px; background: #2563eb; color: white; cursor: pointer; }
-          button.secondary { background: #6b7280; }
-          button:disabled { opacity: .6; cursor: not-allowed; }
-          .list { margin-top: 12px; border-top: 1px dashed #e5e7eb; padding-top: 12px; }
-          .item { display:flex; justify-content: space-between; padding: 6px 0; }
-          .actions { display:flex; gap:8px; }
-          .status { margin-top: 12px; color: #374151; }
-          .link { margin-top: 8px; }
-        </style>
-        <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-        <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-        <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-      </head>
-      <body>
-        <div id="app"></div>
-        <script type="text/babel">
-          const { useState, useEffect } = React;
-
-          function App() {
-            const [path, setPath] = useState('/Users/admin/Desktop/fjn-tools/lots');
-            const [entries, setEntries] = useState([]);
-            const [loading, setLoading] = useState(false);
-            const [status, setStatus] = useState('');
-            const [downloadUrl, setDownloadUrl] = useState('');
-
-            const browse = async (p) => {
-              setLoading(true);
-              setStatus('');
-              try {
-                const res = await fetch(`/api/fs/list?path=${encodeURIComponent(p || path)}`);
-                const data = await res.json();
-                setEntries(data.children || []);
-                if (data.path) setPath(data.path);
-              } catch (e) {
-                setStatus('浏览失败：' + e.message);
-              } finally {
-                setLoading(false);
-              }
-            };
-
-            useEffect(() => { browse(path); }, []);
-
-            const goParent = () => {
-              const idx = path.lastIndexOf('/');
-              if (idx > 0) browse(path.slice(0, idx));
-            };
-
-            const run = async () => {
-              setLoading(true);
-              setStatus('正在生成 xlsx ...');
-              setDownloadUrl('');
-              try {
-                const res = await fetch('/api/sum/run', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ lots_dir: path })
-                });
-                const data = await res.json();
-                if (data.ok) {
-                  setStatus('生成成功：' + data.filename);
-                  setDownloadUrl(data.download_url);
-                } else {
-                  setStatus('生成失败：' + (data.error || '未知错误'));
-                }
-              } catch (e) {
-                setStatus('生成失败：' + e.message);
-              } finally {
-                setLoading(false);
-              }
-            };
-
-            return (
-              <div className="card">
-                <h2>SUM Aggregator 网页工具</h2>
-                <p>选择 lots 目录并生成 xlsx 文件。支持自动生成不重复文件名（如 result(1).xlsx）。</p>
-                <div className="row">
-                  <input type="text" value={path} onChange={e => setPath(e.target.value)} />
-                  <button className="secondary" onClick={() => browse(path)} disabled={loading}>浏览</button>
-                  <button className="secondary" onClick={goParent} disabled={loading}>上一级</button>
-                  <button onClick={run} disabled={loading}>生成 xlsx</button>
-                </div>
-                <div className="list">
-                  {entries.map((it, idx) => (
-                    <div key={idx} className="item">
-                      <span>{it.is_dir ? '📁' : '📄'} {it.name}</span>
-                      <div className="actions">
-                        {it.is_dir && (<button className="secondary" onClick={() => browse(it.path)}>进入</button>)}
-                        {it.is_dir && (<button onClick={() => setPath(it.path)}>选择</button>)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="status">{status}</div>
-                {downloadUrl && <div className="link"><a href={downloadUrl} target="_blank" rel="noreferrer">另存为</a></div>}
-              </div>
-            );
-          }
-
-          ReactDOM.createRoot(document.getElementById('app')).render(<App/>);
-        </script>
-      </body>
-    </html>
-    """
-    return HttpResponse(html)
+# 已统一为静态页面：请使用 index_static 提供的 client/index.html
 
 
 def index_static(_request):
@@ -157,9 +40,46 @@ def index_static(_request):
         return HttpResponse(f"读取页面失败: {exc}", status=500)
 
 
+def _normalize_to_root(p: str) -> Path:
+    """将传入路径规范化到项目根目录下：
+    - 相对路径：按 BASE_ROOT 拼接
+    - 绝对路径：若不在 BASE_ROOT 内，尝试从出现 'lots' 的位置起重定位到 BASE_ROOT
+    """
+    raw = str(p or '').strip()
+    if not raw:
+        return BASE_ROOT
+
+    candidate = Path(raw)
+    # 相对路径：直接拼接到 BASE_ROOT
+    if not candidate.is_absolute():
+        return (BASE_ROOT / candidate).resolve()
+
+    # 绝对路径且已经在 BASE_ROOT 内
+    try:
+        common = os.path.commonpath([str(BASE_ROOT), str(candidate.resolve())])
+    except Exception:
+        common = ''
+    if common == str(BASE_ROOT):
+        return candidate.resolve()
+
+    # 尝试从路径中定位 'lots' 段，并以此作为相对路径重定位到 BASE_ROOT
+    parts = list(candidate.parts)
+    idx = None
+    for i, part in enumerate(parts):
+        if part.lower() == 'lots':
+            idx = i
+            break
+    if idx is not None:
+        rel_parts = parts[idx:]
+        return (BASE_ROOT.joinpath(*rel_parts)).resolve()
+
+    # 找不到 lots，保持严格边界
+    raise ValueError('越界路径')
+
+
 def _ensure_safe_path(p: str) -> Path:
-    """限制访问在 BASE_ROOT 之内，避免越权访问。"""
-    abs_p = Path(p).resolve()
+    """限制访问在 BASE_ROOT 之内，避免越权访问，并进行路径规范化。"""
+    abs_p = _normalize_to_root(p)
     try:
         common = os.path.commonpath([str(BASE_ROOT), str(abs_p)])
     except Exception:

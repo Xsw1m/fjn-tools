@@ -47,12 +47,12 @@
 | 第 1 列       | `Lot_id`（格式：`Category_BIN`，示例：`1_5`，不含 `CAT`/`BIN` 前缀） |
 | 第 2 列及以后 | 各`lot`名称（如 lot1、lot2）                                         |
 | 倒数第 2 列   | `sum`（对应`Lot_id`的跨 lot 总和，为正整数）                         |
-| 最后一列      | `rate`（`sum / 所有 lot 的 Total 之和`，百分比，两位小数）          |
+| 最后一列      | `rate`（`sum / 所有 lot 的 Total 之和`，百分比，两位小数）           |
 
 | 行内容        | 说明                                                               |
 | ------------- | ------------------------------------------------------------------ |
 | 第 1 行       | 行头（`Lot_id`、各`lot`名称、`sum`、`rate`）                       |
-| 第 2 行       | `Total`（各 lot 的最老文件 Total 值）                               |
+| 第 2 行       | `Total`（各 lot 的最老文件 Total 值）                              |
 | 第 3 行       | `TotalPass`（所有文件 TotalPass 之和，整数）                       |
 | 第 4 行       | `TotalFail`（Total - TotalPass，非负整数）                         |
 | 第 5 行及以后 | 各`Category_BIN`的统计行（如 `1_5`、`2_1`；数值为正整数或“error”） |
@@ -140,6 +140,7 @@
 ## 发布与分享（发布版）
 
 ### 必需文件（最小集）
+
 - `web_launch.py`：一键启动（创建虚拟环境、安装依赖、迁移数据库、启动服务并打开页面）。
 - `server/`（Django 项目）：`manage.py`、`webtools/` 下的 `settings.py`、`local_settings.py`、`urls.py`、`wsgi.py`、`asgi.py`。
 - `sumtool/`（Django 应用）：`views.py`、`apps.py`、`migrations/`（保留空目录和 `__init__.py`）。
@@ -148,22 +149,26 @@
 - `README.md`、`requirements.txt`。
 
 ### 不要打包的文件
+
 - `.venv/`、`__pycache__/`、`*.pyc`、`.DS_Store`。
 - `server/db.sqlite3`、`uploads/`、`exports/`、`result.xlsx`。
 - `dist/`（发布包输出目录，打包前可先清空）。
 
 ### 一键启动（推荐给接收方）
+
 - 环境要求：安装 `python3`（建议 3.10+）。
 - 进入项目根目录，执行：`python web_launch.py`
 - 脚本会自动：创建 `.venv` → 安装依赖（`requirements.txt`）→ 迁移数据库 → 启动开发服务器（自动选端口）→ 打开首页。
 - 页面操作：点击“默认”或“选择”选取 `lots` 路径 → 点击“生成 xlsx” → 成功后出现下载链接（自动避免重名）。
 
 ### 本地打包发布版 zip
+
 - 在项目根目录执行：`python make_release.py`
 - 输出文件：`dist/fjn-tools-release.zip`
 - 包含内容：上述“必需文件（最小集）”。
 
 ### 发布到 GitHub 的步骤
+
 1. 初始化仓库并首次提交：
    - `git init`
    - `git add -A`
@@ -176,6 +181,17 @@
 4. 可在 Releases 中上传 `dist/fjn-tools-release.zip` 作为发布附件（可选）。
 
 ### 版本管理建议
+
 - 使用 `.gitignore`（已内置）避免提交临时产物与环境文件。
 - 通过 `requirements.txt` 固定依赖版本，确保他人安装一致。
 - 若需要可重复打包，使用 `make_release.py` 统一产出 zip。
+
+---
+
+## 前端使用说明（统一为静态页）
+
+- 前端入口统一为 `client/index.html`，根路径 `/` 直接返回该页面。
+- 页面默认路径为相对路径 `lots`，适配任何机器的项目目录。
+- 通过“选择”弹窗仅浏览项目根目录内的路径；为安全起见，服务端会拒绝越界路径。
+- 传入的绝对路径若包含 `lots` 段，将自动规范为项目内对应位置（例如 `/Users/foo/bar/lots/lot1` → `<项目>/lots/lot1`）。
+- 原后端内嵌页面已移除，避免双入口造成混淆。

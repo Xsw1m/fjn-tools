@@ -31,9 +31,10 @@
       const { useState } = React;
 
       function App() {
-        const [path, setPath] = useState('/Users/admin/Desktop/fjn-tools/lots');
+        // 使用相对路径，确保在不同机器上都指向项目内的 lots 目录
+        const [path, setPath] = useState('lots');
         const [showPicker, setShowPicker] = useState(false);
-        const [browsePath, setBrowsePath] = useState('/Users/admin/Desktop/fjn-tools/lots');
+        const [browsePath, setBrowsePath] = useState('lots');
         const [entries, setEntries] = useState([]);
         const [loading, setLoading] = useState(false);
         const [status, setStatus] = useState('');
@@ -55,7 +56,7 @@
             });
             const data = await res.json();
             if (data.ok) {
-              setStatus(`生成成功：${data.filename}`);
+              setStatus(`已在根目录下的 exports 文件夹下成功生成：${data.filename}`);
               setDownloadUrl(data.download_url);
             } else {
               setStatus('生成失败：' + (data.error || '未知错误'));
@@ -68,7 +69,7 @@
         };
 
         const useDefault = () => {
-          setPath('/Users/admin/Desktop/fjn-tools/lots');
+          setPath('lots');
           setStatus('已填充默认 lots 路径');
           setDownloadUrl('');
         };
@@ -95,7 +96,10 @@
         };
 
         const goUp = async () => {
-          const idx = browsePath.lastIndexOf('/');
+          // 兼容 Windows 和 Unix 路径分隔符
+          const slashIdx = browsePath.lastIndexOf('/');
+          const backIdx = browsePath.lastIndexOf('\\');
+          const idx = Math.max(slashIdx, backIdx);
           if (idx > 0) {
             await loadDir(browsePath.slice(0, idx));
           }
@@ -114,13 +118,13 @@
             <p>输入 lots 目录路径，点击生成 xlsx。会自动避免重名（如 result(1).xlsx）。</p>
             <label htmlFor="lotsPath">lots 路径</label>
             <div className="row">
-              <input id="lotsPath" type="text" value={path} onChange={e => setPath(e.target.value)} placeholder="/Users/admin/Desktop/fjn-tools/lots" />
+              <input id="lotsPath" type="text" value={path} onChange={e => setPath(e.target.value)} placeholder="lots" />
               <button onClick={useDefault} disabled={loading} title="填充默认路径">默认</button>
               <button onClick={openPicker} disabled={loading} title="从服务器浏览并选择">选择</button>
               <button onClick={run} disabled={loading}>生成 xlsx</button>
             </div>
             <div className="status">{status}</div>
-            {downloadUrl && <div className="link"><a href={downloadUrl} target="_blank" rel="noreferrer">另存为</a></div>}
+            {downloadUrl && <div className="link"><a href={downloadUrl} target="_blank" rel="noreferrer">🤔找不到？另存为</a></div>}
             {showPicker && (
               <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.35)',display:'flex',alignItems:'center',justifyContent:'center'}}>
                 <div style={{background:'#fff',borderRadius:12,padding:16,width:'680px',maxHeight:'70vh',boxShadow:'0 10px 30px rgba(0,0,0,.15)'}}>

@@ -33,9 +33,22 @@ def ensure_venv():
     if not VENV_DIR.exists():
         print('[+] 创建虚拟环境 .venv ...')
         venv.create(str(VENV_DIR), with_pip=True)
-    vpy = VENV_DIR / 'bin' / 'python'
+    if sys.platform == "win32":
+        vpy = VENV_DIR / 'Scripts' / 'python.exe'
+    else:
+        vpy = VENV_DIR / 'bin' / 'python'
+
     pip = [str(vpy), '-m', 'pip']
-    print('[+] 升级 pip ...')
+
+    # 先确保 pip 可用（部分系统的 venv 可能未包含 pip）
+    print('[+] 检查 pip ...')
+    try:
+        subprocess.check_call([str(vpy), '-m', 'pip', '--version'])
+    except subprocess.CalledProcessError:
+        print('[!] 当前虚拟环境未检测到 pip，尝试使用 ensurepip 安装 ...')
+        subprocess.check_call([str(vpy), '-m', 'ensurepip', '--upgrade'])
+
+    print('[+] 升级 pip/setuptools/wheel ...')
     subprocess.check_call(pip + ['install', '--upgrade', 'pip', 'setuptools', 'wheel'])
 
     # 安装后端所需依赖：Django + 跨域 + 表格相关
@@ -47,7 +60,11 @@ def ensure_venv():
         'XlsxWriter>=3.1',
     ]
     print('[+] 安装依赖 ...')
-    subprocess.check_call(pip + ['install'] + deps)
+    req = ROOT / 'requirements.txt'
+    if req.exists():
+        subprocess.check_call(pip + ['install', '-r', str(req)])
+    else:
+        subprocess.check_call(pip + ['install'] + deps)
     return str(vpy)
 
 
