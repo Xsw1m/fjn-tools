@@ -144,7 +144,7 @@
 - `web_launch.py`：一键启动（创建虚拟环境、安装依赖、迁移数据库、启动服务并打开页面）。
 - `server/`（Django 项目）：`manage.py`、`webtools/` 下的 `settings.py`、`local_settings.py`、`urls.py`、`wsgi.py`、`asgi.py`。
 - `sumtool/`（Django 应用）：`views.py`、`apps.py`、`migrations/`（保留空目录和 `__init__.py`）。
-- `sum_aggregator.py`：汇总核心逻辑。
+- `tools/calcSumXlsx/sum_aggregator.py`：汇总核心逻辑（工具包目录）。
 - `client/index.html`：前端静态页面（路径输入、服务器目录选择、生成按钮）。
 - `README.md`、`requirements.txt`。
 

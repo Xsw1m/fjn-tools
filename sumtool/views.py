@@ -15,11 +15,11 @@ EXPORTS_DIR.mkdir(exist_ok=True)
 UPLOADS_DIR = BASE_ROOT / 'uploads'
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-# 让 Python 能导入根目录下的 sum_aggregator.py
+# 让 Python 能导入根目录下的 tools 包（tools/calcSumXlsx/sum_aggregator.py）
 if str(BASE_ROOT) not in sys.path:
     sys.path.insert(0, str(BASE_ROOT))
 try:
-    import sum_aggregator as sa
+    from tools.calcSumXlsx import sum_aggregator as sa
 except Exception:
     sa = None
 
@@ -131,7 +131,7 @@ def api_sum_run(request):
             return JsonResponse({'ok': False, 'error': 'lots 目录不存在'})
 
         if sa is None:
-            return JsonResponse({'ok': False, 'error': 'sum_aggregator 导入失败'})
+            return JsonResponse({'ok': False, 'error': 'tools.calcSumXlsx.sum_aggregator 导入失败'})
 
         # 聚合并写出到 exports
         lot_subdirs = [str(abs_lots / d) for d in os.listdir(abs_lots) if (abs_lots / d).is_dir()]

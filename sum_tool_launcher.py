@@ -31,7 +31,7 @@ def _reexec_with_venv_if_available() -> None:
 
 
 try:
-    from sum_aggregator import main as aggregator_main
+    from tools.calcSumXlsx.sum_aggregator import main as aggregator_main
 except ModuleNotFoundError as e:
     missing = getattr(e, "name", "")
     # 依赖缺失：尝试使用虚拟环境重新执行
@@ -44,8 +44,12 @@ except ModuleNotFoundError as e:
         )
         sys.exit(2)
     # 文件本身缺失
-    if missing == "sum_aggregator":
-        print("无法导入 sum_aggregator，请确保该文件与启动器位于同一目录。", file=sys.stderr)
+    if missing in ("sum_aggregator", "tools", "tools.calcSumXlsx", "tools.calcSumXlsx.sum_aggregator"):
+        print(
+            "无法导入工具模块：tools.calcSumXlsx.sum_aggregator。\n"
+            "请确认已存在 tools/calcSumXlsx/sum_aggregator.py，并且当前目录是项目根目录。",
+            file=sys.stderr,
+        )
         sys.exit(2)
     # 其他导入问题
     _reexec_with_venv_if_available()

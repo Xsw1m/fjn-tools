@@ -69,10 +69,12 @@ def build_release():
         # 单文件（可选缺失时跳过）
         for fname in [
             "web_launch.py",
-            "sum_aggregator.py",
             "sum_tool_launcher.py",
             "README.md",
             "requirements.txt",
+            "tools/__init__.py",
+            "tools/calcSumXlsx/__init__.py",
+            "tools/calcSumXlsx/sum_aggregator.py",
         ]:
             add_file(z, ROOT / fname)
 
