@@ -9,8 +9,8 @@ class mapping_bin():  # 要加上self归类
     # 需求： 根据TP在3270文件夹下查询大mapping对应名称, 请使用Python根据给出的TffP给出重流与不重流的bin有那些。
     def get_info_from_mapping(self) -> list:
         # 1. 指定文件夹路径 - 根路径 3270文件夹
-        directory_path = r"\\172.21.10.201\3270"
-        # 2. 查找mapping文件 "\\172.21.10.201\3270\OV09642_SLT_60C_RMB2_EC8201_A\ProductFile\Category"
+        directory_path = r"\\172.33.10.11\3270"
+        # 2. 查找mapping文件 "\\172.33.10.11\3270\OV09642_SLT_60C_RMB2_EC8201_A\ProductFile\Category"
         software_files = os.path.join(directory_path, self.tpName, "ProductFile", "Category")
         mapping_files = [f for f in os.listdir(software_files) if f.endswith('.mapping')]  # 列表推导式
         print('11111', mapping_files)
@@ -94,7 +94,7 @@ class mapping_bin():  # 要加上self归类
 
     # 查询 3270 下 符合输入 tp 的 tpName 有哪些
     def get_tp_name_from_3270(self) -> list:
-        directory_path = r"\\172.21.10.201\3270"
+        directory_path = r"\\172.33.10.11\3270"
         # 获取 3270 文件夹下 都有哪些文件名
         # 且为了保持唯一性（去除 zip 文件）、需要确保 条件1. 该文件是 文件夹 且 满足名字符合 tp 的文件有哪些（isdir的作用）
         mapping_files = [f for f in os.listdir(directory_path)

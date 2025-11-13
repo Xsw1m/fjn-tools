@@ -52,7 +52,7 @@ def _parse_category_remark(text: str) -> dict:
     return result
 
 def get_category_remark_map(tp: str) -> dict:
-    directory_path = r"\\172.21.10.201\3270"
+    directory_path = r"\\172.33.10.11\3270"
     candidates = [f for f in os.listdir(directory_path) if tp in f]
     for entry in candidates:
         if '.zip' in entry:

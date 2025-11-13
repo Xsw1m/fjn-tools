@@ -62,13 +62,13 @@
 
 ## 六、remark 列生成规则
 
-- 每个 SUM 文件包含 `project_id` 字段，其值为 `TpName`。
-- 根据任意 lot 的最新 SUM 文件解析到的 `TpName`，在网络目录 `\\172.21.10.201\3270` 下查找对应 Mapping 文件（支持 zip 包与普通文件夹），解析得到 `category → remark(Code Description)` 对应关系。
+- 每个 SUM 文件包含 `Program ID` 字段，其值作为 `TpName` 来源。
+- 根据任意 lot 的最新 SUM 文件解析到的 `TpName`，在网络目录 `\\172.33.10.11\3270` 下查找对应 Mapping 文件（支持 zip 包与普通文件夹），解析得到 `category → remark(Code Description)` 对应关系。
 - remark 仅与 `category` 相关，与 `BIN` 无关；为保证一致性，若无法解析到映射则置空。
 
 ### 异常与兜底（细分）
 
-- 未解析到任意 SUM 文件的 `project_id`（`TpName`）：`remark` 列显示 `没找到 Project_id`。
+- 未解析到任意 SUM 文件的 `Program ID`：`remark` 列显示 `没找到 Program ID`。
 - 所有 SUM 文件均解析到 `TpName`，但未找到任何 Mapping 文件：`remark` 列显示 `没找到 Mapping`。
 - 找到 Mapping，但某一行的 `category` 在 Mapping 中没有对应描述：该行 `remark` 显示 `没找到 Mapping 里面对应 category 的 Remark`。
 

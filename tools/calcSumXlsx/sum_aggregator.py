@@ -430,7 +430,7 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
                 lot_maps[lt.lot_name] = {}
         missing_lots = [lt.lot_name for lt in lots if not lt.tp_name]
         if missing_lots:
-            print(f"缺少 project_id 的 lot: {', '.join(missing_lots)}", file=sys.stderr)
+            print(f"缺少 Program ID 的 lot: {', '.join(missing_lots)}", file=sys.stderr)
     except Exception:
         lot_maps = {lt.lot_name: {} for lt in lots}
     for key in sorted_cat_bin:
@@ -461,7 +461,7 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
         if cat is not None:
             for lt in lots:
                 if not lt.tp_name:
-                    lot_status_msgs.append(f"{lt.lot_name}:没找到 Project_id")
+                    lot_status_msgs.append(f"{lt.lot_name}:没找到 Program ID")
                     continue
                 mp = lot_maps.get(lt.lot_name, {})
                 if not mp:
@@ -555,8 +555,11 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv))
 def extract_tp_name(text: str) -> Union[str, None]:
     patterns = [
-        r"\bproject_id\b\s*[:=]?\s*([^\r\n]+)",
-        r"\bProject\s*ID\b\s*[:=]?\s*([^\r\n]+)",
+        # Program ID 作为 TP 名来源，兼容多种写法
+        r"\bProgram\s*ID\b\s*[:=]?\s*([^\r\n]+)",
+        r"\bProgramID\b\s*[:=]?\s*([^\r\n]+)",
+        r"\bprogram_id\b\s*[:=]?\s*([^\r\n]+)",
+        r"\bProgram\s*Id\b\s*[:=]?\s*([^\r\n]+)",
     ]
     for pat in patterns:
         m = re.search(pat, text, flags=re.IGNORECASE)

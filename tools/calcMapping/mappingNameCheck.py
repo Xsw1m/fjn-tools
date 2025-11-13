@@ -17,8 +17,8 @@ class mappingNameCheck():  # 要加上self归类
     # 一、获取 mapping name
     def get_mapping_name(self):
         # 1. 指定文件夹路径 - 根路径 3270文件夹
-        directory_path = r"\\172.21.10.201\3270"
-        # 2. 查找mapping文件 "\\172.21.10.201\3270\中符合 TP 的文件或文件夹有哪些"
+        directory_path = r"\\172.33.10.11\3270"
+        # 2. 查找mapping文件 "\\172.33.10.11\3270\中符合 TP 的文件或文件夹有哪些"
         files = [f for f in os.listdir(directory_path) if self.TP in f]  # 列表推导式
         # 3. 遍历文件列表
         for file in files:
