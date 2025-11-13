@@ -52,6 +52,7 @@ class SumFile:
     total_pass: int
     total_fail: int
     details: List[SumDetail]
+    tp_name: str
 
 
 def parse_timestamp_from_filename(filename: str) -> datetime:
@@ -253,7 +254,8 @@ def parse_sum_file(path: str) -> SumFile:
 
     total_pass, total_fail = extract_totals(text)
     details = extract_details(text)
-    return SumFile(path=path, timestamp=ts, total_pass=total_pass, total_fail=total_fail, details=details)
+    tp_name = extract_tp_name(text) or ""
+    return SumFile(path=path, timestamp=ts, total_pass=total_pass, total_fail=total_fail, details=details, tp_name=tp_name)
 
 
 # -----------------------------
@@ -267,6 +269,7 @@ class LotSummary:
     total_pass_sum: int
     total_fail: int
     cells: Dict[str, Union[int, str]]  # 行键 -> 数值或 "error"
+    tp_name: str
 
 
 def _row_key(category: int, binv: int) -> str:
@@ -343,6 +346,7 @@ def aggregate_lot(lot_dir: str) -> LotSummary:
         total_pass_sum=total_pass_sum,
         total_fail=total_fail,
         cells=cells,
+        tp_name=latest.tp_name,
     )
 
 
@@ -376,7 +380,7 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
     row_order.extend(sorted_cat_bin)
 
     # 列：各 lot 名称 + sum + rate
-    columns = [lt.lot_name for lt in lots] + ["sum", "rate"]
+    columns = [lt.lot_name for lt in lots] + ["sum", "rate", "remark"]
     df = pd.DataFrame(index=row_order, columns=columns)
 
     # 填充三行指标
@@ -386,7 +390,8 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
         df.at["Total", lt.lot_name] = lt.earliest_total
         total_row_sum += lt.earliest_total
     df.at["Total", "sum"] = total_row_sum
-    df.at["Total", "rate"] = f"{(total_row_sum / sum_total_across_lots) * 100:.2f}%"  # 应为 100.00%
+    df.at["Total", "rate"] = f"{(total_row_sum / sum_total_across_lots) * 100:.2f}%"
+    df.at["Total", "remark"] = ""
 
     # TotalPass
     total_pass_sum_all = 0
@@ -395,6 +400,7 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
         total_pass_sum_all += lt.total_pass_sum
     df.at["TotalPass", "sum"] = total_pass_sum_all
     df.at["TotalPass", "rate"] = f"{(total_pass_sum_all / sum_total_across_lots) * 100:.2f}%"
+    df.at["TotalPass", "remark"] = ""
 
     # TotalFail（用 sum_total_across_lots - total_pass_sum_all 更稳）
     total_fail_sum_all = sum_total_across_lots - total_pass_sum_all
@@ -402,8 +408,31 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
         df.at["TotalFail", lt.lot_name] = lt.total_fail
     df.at["TotalFail", "sum"] = total_fail_sum_all
     df.at["TotalFail", "rate"] = f"{(total_fail_sum_all / sum_total_across_lots) * 100:.2f}%"
+    df.at["TotalFail", "remark"] = ""
 
     # 填充 Category_BIN 行
+    try:
+        try:
+            from tools.calcMapping.findMappingByTpName import get_category_remark_map
+        except Exception:
+            import sys as _sys
+            import os as _os
+            _sys.path.append(_os.path.join(_os.path.dirname(__file__), "..", "calcMapping"))
+            from findMappingByTpName import get_category_remark_map  # type: ignore
+        lot_maps: Dict[str, Dict[int, str]] = {}
+        for lt in lots:
+            if lt.tp_name:
+                try:
+                    lot_maps[lt.lot_name] = get_category_remark_map(lt.tp_name) or {}
+                except Exception:
+                    lot_maps[lt.lot_name] = {}
+            else:
+                lot_maps[lt.lot_name] = {}
+        missing_lots = [lt.lot_name for lt in lots if not lt.tp_name]
+        if missing_lots:
+            print(f"缺少 project_id 的 lot: {', '.join(missing_lots)}", file=sys.stderr)
+    except Exception:
+        lot_maps = {lt.lot_name: {} for lt in lots}
     for key in sorted_cat_bin:
         values: List[Union[int, str]] = []
         has_error = False
@@ -414,6 +443,10 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
             df.at[key, lt.lot_name] = v
             values.append(v)
 
+        try:
+            cat = int(key.split("_")[0])
+        except Exception:
+            cat = None
         if has_error:
             df.at[key, "sum"] = "error"
             df.at[key, "rate"] = "error"
@@ -421,6 +454,31 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
             numeric_sum = int(sum(int(v) for v in values))
             df.at[key, "sum"] = numeric_sum
             df.at[key, "rate"] = f"{(numeric_sum / sum_total_across_lots) * 100:.2f}%"
+
+        # 构建按 lot 的 remark 状态并汇总到单列
+        lot_status_msgs: List[str] = []
+        chosen_remark: str = ""
+        if cat is not None:
+            for lt in lots:
+                if not lt.tp_name:
+                    lot_status_msgs.append(f"{lt.lot_name}:没找到 Project_id")
+                    continue
+                mp = lot_maps.get(lt.lot_name, {})
+                if not mp:
+                    lot_status_msgs.append(f"{lt.lot_name}:没找到 Mapping")
+                    continue
+                if cat not in mp:
+                    lot_status_msgs.append(f"{lt.lot_name}:没找到 Mapping 里面对应 category 的 Remark")
+                    continue
+                if not chosen_remark:
+                    chosen_remark = mp[cat]
+
+        if chosen_remark and lot_status_msgs:
+            df.at[key, "remark"] = f"{chosen_remark} | " + "; ".join(lot_status_msgs)
+        elif chosen_remark:
+            df.at[key, "remark"] = chosen_remark
+        else:
+            df.at[key, "remark"] = "; ".join(lot_status_msgs) if lot_status_msgs else ""
 
     return df
 
@@ -495,3 +553,14 @@ def main(argv: List[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))
+def extract_tp_name(text: str) -> Union[str, None]:
+    patterns = [
+        r"\bproject_id\b\s*[:=]?\s*([^\r\n]+)",
+        r"\bProject\s*ID\b\s*[:=]?\s*([^\r\n]+)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, flags=re.IGNORECASE)
+        if m:
+            val = m.group(1).strip()
+            return val
+    return None

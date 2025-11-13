@@ -46,16 +46,31 @@
 | ------------- | -------------------------------------------------------------------- |
 | 第 1 列       | `Lot_id`（格式：`Category_BIN`，示例：`1_5`，不含 `CAT`/`BIN` 前缀） |
 | 第 2 列及以后 | 各`lot`名称（如 lot1、lot2）                                         |
-| 倒数第 2 列   | `sum`（对应`Lot_id`的跨 lot 总和，为正整数）                         |
-| 最后一列      | `rate`（`sum / 所有 lot 的 Total 之和`，百分比，两位小数）           |
+| 倒数第 3 列   | `sum`（对应`Lot_id`的跨 lot 总和，为正整数）                         |
+| 倒数第 2 列   | `rate`（`sum / 所有 lot 的 Total 之和`，百分比，两位小数）           |
+| 最后一列      | `remark`（按 `TpName` 映射的 `category → Code Description` 文本）    |
 
-| 行内容        | 说明                                                               |
-| ------------- | ------------------------------------------------------------------ |
-| 第 1 行       | 行头（`Lot_id`、各`lot`名称、`sum`、`rate`）                       |
-| 第 2 行       | `Total`（各 lot 的最老文件 Total 值）                              |
-| 第 3 行       | `TotalPass`（所有文件 TotalPass 之和，整数）                       |
-| 第 4 行       | `TotalFail`（Total - TotalPass，非负整数）                         |
-| 第 5 行及以后 | 各`Category_BIN`的统计行（如 `1_5`、`2_1`；数值为正整数或“error”） |
+| 行内容        | 说明                                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------------------------- |
+| 第 1 行       | 行头（`Lot_id`、各`lot`名称、`sum`、`rate`、`remark`）                                                |
+| 第 2 行       | `Total`（各 lot 的最老文件 Total 值；`remark` 为空）                                                  |
+| 第 3 行       | `TotalPass`（所有文件 TotalPass 之和；`remark` 为空）                                                 |
+| 第 4 行       | `TotalFail`（Total - TotalPass；`remark` 为空）                                                       |
+| 第 5 行及以后 | 各`Category_BIN`统计行（如 `1_5`、`2_1`；数值为正整数或“error”）；`remark` 为该 `category` 的描述文本 |
+
+---
+
+## 六、remark 列生成规则
+
+- 每个 SUM 文件包含 `project_id` 字段，其值为 `TpName`。
+- 根据任意 lot 的最新 SUM 文件解析到的 `TpName`，在网络目录 `\\172.21.10.201\3270` 下查找对应 Mapping 文件（支持 zip 包与普通文件夹），解析得到 `category → remark(Code Description)` 对应关系。
+- remark 仅与 `category` 相关，与 `BIN` 无关；为保证一致性，若无法解析到映射则置空。
+
+### 异常与兜底（细分）
+
+- 未解析到任意 SUM 文件的 `project_id`（`TpName`）：`remark` 列显示 `没找到 Project_id`。
+- 所有 SUM 文件均解析到 `TpName`，但未找到任何 Mapping 文件：`remark` 列显示 `没找到 Mapping`。
+- 找到 Mapping，但某一行的 `category` 在 Mapping 中没有对应描述：该行 `remark` 显示 `没找到 Mapping 里面对应 category 的 Remark`。
 
 ---
 
@@ -77,6 +92,6 @@
      - BIN 为 2、3、5 时，统计对应 lot 最新文件的 COUNT 正整数值；
      - 同一 lot 下**任意两个文件**中相同 Category 的 BIN 不一致时，标记该 lot 对应单元格为“error”。
 
-4. **生成 xlsx**：按照指定格式生成 xlsx，列包含各 lot 名称、`sum`（正整数）、`rate`（百分比，保留两位小数）；行包含`Total`（整数）、`TotalPass`（整数）、`TotalFail`（非负整数）及各`Category_BIN`条目（数值为正整数或“error”）。
+4. **生成 xlsx**：按照指定格式生成 xlsx，列包含各 lot 名称、`sum`（正整数）、`rate`（百分比，两位小数）、`remark`（由 `TpName` 的 Mapping 解析得到的 `category` 描述）；行包含`Total`（整数）、`TotalPass`（整数）、`TotalFail`（非负整数）及各`Category_BIN`条目（数值为正整数或“error”，对应行的 `remark` 为该 `category` 的描述）。
 
 请使用`pandas`库处理数据，`openpyxl`或`xlsxwriter`处理 Excel 生成，确保代码结构清晰、有必要的注释，并处理可能的异常（如文件读取错误、字段缺失、Total 不一致等）。
