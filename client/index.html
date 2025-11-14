@@ -184,8 +184,9 @@
 
       // 第一步：准备 SUM 文件（输入多个 lot 名并筛选复制）
       function PrepareLots() {
-        const [sourceRoot, setSourceRoot] = useState('\\\\172.33.10.11\\SLT_Summary');
+        const [sourceRoot, setSourceRoot] = useState('');
         const [inputVal, setInputVal] = useState('');
+        const [recentDays, setRecentDays] = useState('');
         const [lots, setLots] = useState([]);
         const [status, setStatus] = useState('');
         const [stats, setStats] = useState(null);
@@ -210,9 +211,14 @@
           setPreparing(true);
           setStatus('正在筛选并复制...'); setStats(null);
           try {
+            const payload = { lot_names: lots, source_root: sourceRoot };
+            if ((recentDays || '').trim()) {
+              const n = parseInt(recentDays, 10);
+              if (!isNaN(n) && n > 0) payload.recent_days = n;
+            }
             const res = await fetch('/api/sum/prepare/start', {
               method:'POST', headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({ lot_names: lots, source_root: sourceRoot })
+              body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!data.ok) { setPreparing(false); setStatus('失败：' + (data.error || '未知错误')); return; }
@@ -249,10 +255,14 @@
               <h2 style={{margin:0}}>准备 SUM 文件</h2>
               <a href="#/" style={{color:'#2563eb',textDecoration:'none'}}>← 返回门户</a>
             </div>
-            <p className="comment">第一步：输入多个 lot 名，点击“开始筛选复制”，从 SLT_Summary 递归查找匹配的 SUM 文件并复制到 lots/lotName。</p>
-            <label htmlFor="srcRoot">源目录（可选，默认 UNC 或环境变量）</label>
+            <p className="comment">第一步：输入多个 lot 名，点击“开始筛选复制”，递归查找匹配的 SUM 文件并复制到 lots/lotName（源目录默认读取配置 SLT_SUMMARY_ROOT）。</p>
+            <label htmlFor="srcRoot">源目录（留空则自动读取配置）</label>
             <div className="row" style={{marginBottom:8}}>
-              <input id="srcRoot" type="text" value={sourceRoot} onChange={e=>setSourceRoot(e.target.value)} placeholder="\\\\172.33.10.11\\SLT_Summary" />
+              <input id="srcRoot" type="text" value={sourceRoot} onChange={e=>setSourceRoot(e.target.value)} placeholder="例如：//server/SLT_Summary（非必填可跳过）" />
+            </div>
+            <label htmlFor="recentDays">近 N 天（可选，整数）</label>
+            <div className="row" style={{marginBottom:8}}>
+              <input id="recentDays" type="text" inputMode="numeric" pattern="[0-9]*" value={recentDays} onChange={e=>setRecentDays(e.target.value)} placeholder="不填则全量扫描，例如：7" />
             </div>
             <label htmlFor="lotName">lot 名（不区分大小写）</label>
             <div className="row">
@@ -292,8 +302,9 @@
 
       // 一体化流程：先准备（筛选复制），再汇总生成 xlsx
       function SumWizard() {
-        const [sourceRoot, setSourceRoot] = useState('\\\\172.33.10.11\\SLT_Summary');
+        const [sourceRoot, setSourceRoot] = useState('');
         const [inputVal, setInputVal] = useState('');
+        const [recentDays, setRecentDays] = useState('');
         const [lots, setLots] = useState([]);
         const [prepareStats, setPrepareStats] = useState(null);
         const [prepareStatus, setPrepareStatus] = useState('');
@@ -326,9 +337,14 @@
           setPreparing(true);
           setPrepareStatus('正在筛选并复制...'); setPrepareStats(null); setRunStatus(''); setDownloadUrl('');
           try {
+            const payload = { lot_names: lots, source_root: sourceRoot };
+            if ((recentDays || '').trim()) {
+              const n = parseInt(recentDays, 10);
+              if (!isNaN(n) && n > 0) payload.recent_days = n;
+            }
             const res = await fetch('/api/sum/prepare/start', {
               method:'POST', headers:{'Content-Type':'application/json'},
-              body: JSON.stringify({ lot_names: lots, source_root: sourceRoot })
+              body: JSON.stringify(payload)
             });
             const data = await res.json();
             if (!data.ok) { setPreparing(false); setPrepareStatus('失败：' + (data.error || '未知错误')); return; }
@@ -446,10 +462,14 @@
             {step === 1 && (
               <div>
                 <h3 style={{margin:'16px 0 8px'}}>步骤一：准备 SUM 文件</h3>
-                <label htmlFor="srcRoot">源目录（可选，默认 UNC 或环境变量）</label>
-                <div className="row" style={{marginBottom:8}}>
-                  <input id="srcRoot" type="text" value={sourceRoot} onChange={e=>setSourceRoot(e.target.value)} placeholder="\\\\172.33.10.11\\SLT_Summary" />
-                </div>
+            <label htmlFor="srcRoot">源目录（留空则自动读取配置）</label>
+            <div className="row" style={{marginBottom:8}}>
+              <input id="srcRoot" type="text" value={sourceRoot} onChange={e=>setSourceRoot(e.target.value)} placeholder="例如：//server/SLT_Summary（非必填可跳过）" />
+            </div>
+            <label htmlFor="recentDays">近 N 天（可选，整数）</label>
+            <div className="row" style={{marginBottom:8}}>
+              <input id="recentDays" type="text" inputMode="numeric" pattern="[0-9]*" value={recentDays} onChange={e=>setRecentDays(e.target.value)} placeholder="不填则全量扫描，例如：7" />
+            </div>
                 <label htmlFor="lotName">lot 名（不区分大小写）</label>
                 <div className="row">
                   <input id="lotName" type="text" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="例如：smx" />

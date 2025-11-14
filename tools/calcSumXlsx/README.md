@@ -18,7 +18,7 @@
 - 时间戳格式为`MMDDYY_HHmmss`，解析为**25 年 MM 月 DD 日\_HH 点 mm 分 ss 秒**（如 081125_040616 表示 25 年 11 月 08 日\_04 点 06 分 16 秒），用于判断文件生成时间的先后顺序，解析需精确到秒以保证排序准确性。
 
 附：准备与清理（前置步骤）
-- 准备：根据用户输入的多个 lot 名，从源目录（默认 `\\172.33.10.11\SLT_Summary`，可由环境变量 `SLT_SUMMARY_ROOT` 指定本地挂载路径）递归筛选复制到 `lots/lot_name/`。
+- 准备：根据用户输入的多个 lot 名，从源目录（默认读取配置 `SLT_SUMMARY_ROOT`，可由环境变量同名键覆盖）递归筛选复制到 `lots/lot_name/`。
   - 仅复制扩展名为 `.SUM` 或 `.txt` 的文件；
   - 文件名需包含任意一个 lot 名（不区分大小写）；
   - 文件名包含 `ENG` 或 `SPC`（不区分大小写）则排除；
@@ -78,7 +78,7 @@
 ## 六、remark 列生成规则
 
 - 每个 SUM 文件包含 `Program ID` 字段，其值作为 `TpName` 来源。
-- 根据任意 lot 的最新 SUM 文件解析到的 `TpName`，在网络目录 `\\172.33.10.11\3270` 下查找对应 Mapping 文件（支持 zip 包与普通文件夹），解析得到 `category → remark(Code Description)` 对应关系。
+- 根据任意 lot 的最新 SUM 文件解析到的 `TpName`，在配置的 `MAPPING_ROOT` 根目录下查找对应 Mapping 文件（支持 zip 包与普通文件夹），解析得到 `category → remark(Code Description)` 对应关系。
 - remark 仅与 `category` 相关，与 `BIN` 无关；为保证一致性，若无法解析到映射则置空。
 
 ### 异常与兜底（细分）

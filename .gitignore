@@ -30,3 +30,6 @@ client/.cache/
 # Demo
 demo/
 lots/
+
+# Config (hide real server addresses)
+config/config.json

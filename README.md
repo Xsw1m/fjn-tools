@@ -116,3 +116,26 @@ title: SUM 汇总工具
 - 通过“选择”弹窗仅浏览项目根目录内的路径；为安全起见，服务端会拒绝越界路径。
 - 传入的绝对路径若包含 `lots` 段，将自动规范为项目内对应位置（例如 `/Users/foo/bar/lots/lot1` → `<项目>/lots/lot1`）。
 - 原后端内嵌页面已移除，避免双入口造成混淆。
+
+---
+
+## 配置与地址（请务必填写）
+
+- 统一配置文件：`config/config.json`（真实文件，默认被 `.gitignore` 忽略）
+- 示例文件：`config/config.example.json`（已提交到仓库，可复制为真实配置后修改）
+
+需要填写的键：
+
+- `SLT_SUMMARY_ROOT`：SUM 源目录（例如 `//server/SLT_Summary`）。后端准备接口与前端默认都会读取此值。
+- `MAPPING_ROOT`：Mapping 根目录（例如 `//server/3270`）。用于 remark 解析工具与脚本。
+
+安全与提交说明：
+
+- 请不要把真实共享地址（例如 `\\172.XX.XX.XX\...`）写在代码里或提交到仓库。
+- 真实配置请写入 `config/config.json`，该文件已在 `.gitignore` 中忽略，不会被提交。
+- 若不方便创建文件，也可以通过环境变量设置同名键：`SLT_SUMMARY_ROOT`、`MAPPING_ROOT`。
+
+前端与后端行为：
+
+- 前端“源目录”输入留空时，后端会从 `config/config.json` 或环境变量读取 `SLT_SUMMARY_ROOT`。
+- 所有涉及 Mapping 的工具脚本（`tools/calcMapping/*`）将读取 `MAPPING_ROOT`。

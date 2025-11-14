@@ -1,6 +1,7 @@
 import os
 import re
 import zipfile
+from tools.config_loader import get_config
 
 def _validate_mapping_name(name: str) -> bool:
     return bool(re.compile(r'^OVT FT\+SLT_A V[3-4]\.0_[a-zA-Z0-9]{7}_(Nor|New[0-4])\.mapping$').match(name))
@@ -52,7 +53,11 @@ def _parse_category_remark(text: str) -> dict:
     return result
 
 def get_category_remark_map(tp: str) -> dict:
-    directory_path = r"\\172.33.10.11\3270"
+    directory_path = get_config('MAPPING_ROOT') or ''
+    if not directory_path:
+        # 保持函数健壮性：返回空映射，并提醒配置
+        print("请在 config/config.json 设置 MAPPING_ROOT 或配置环境变量 MAPPING_ROOT")
+        return {}
     candidates = [f for f in os.listdir(directory_path) if tp in f]
     for entry in candidates:
         if '.zip' in entry:

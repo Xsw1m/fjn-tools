@@ -20,12 +20,63 @@ import socket
 import subprocess
 import webbrowser
 from pathlib import Path
+import json
 
 
 ROOT = Path(__file__).resolve().parent
 SERVER_DIR = ROOT / 'server'
 MANAGE = SERVER_DIR / 'manage.py'
 VENV_DIR = ROOT / '.venv'
+CONFIG_DIR = ROOT / 'config'
+CONFIG_FILE = CONFIG_DIR / 'config.json'
+CONFIG_EXAMPLE = CONFIG_DIR / 'config.example.json'
+
+
+def ensure_config_interactive():
+    """确保存在配置文件 config/config.json。
+
+    - 若存在：读取后将同名键注入到当前进程的环境变量（若环境变量未设置）。
+    - 若不存在：交互提示用户输入共享盘地址，创建 config.json。
+    """
+    CONFIG_DIR.mkdir(exist_ok=True)
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                cfg = json.load(f) or {}
+            for k in ('SLT_SUMMARY_ROOT', 'MAPPING_ROOT'):
+                if k in cfg and (os.environ.get(k) is None or os.environ.get(k) == ''):
+                    os.environ[k] = str(cfg.get(k) or '').strip()
+            print('[+] 已读取配置文件 config/config.json。')
+        except Exception as exc:
+            print('[!] 读取 config/config.json 失败：', exc)
+        return
+
+    print('''
+[+] 未检测到配置文件 config/config.json。
+    该文件用于保存共享盘地址（不提交到仓库，已在 .gitignore 忽略）。
+    如果你不清楚，可参考示例：config/config.example.json。
+    ''')
+    try:
+        server = input('请输入 server 共享网络 io 地址，例如: \\\\172.xx.xx.xx\ ').strip()
+    except EOFError:
+        server = ''
+
+    cfg = {
+        'SLT_SUMMARY_ROOT': server + 'SLT_Summary' or '',
+        'MAPPING_ROOT': server + '3270' or '',
+    }
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        print('[+] 已生成配置文件：', CONFIG_FILE)
+    except Exception as exc:
+        print('[x] 写入配置文件失败：', exc)
+
+    # 同步到当前进程环境变量，便于后续使用
+    if cfg.get('SLT_SUMMARY_ROOT'):
+        os.environ['SLT_SUMMARY_ROOT'] = cfg['SLT_SUMMARY_ROOT']
+    if cfg.get('MAPPING_ROOT'):
+        os.environ['MAPPING_ROOT'] = cfg['MAPPING_ROOT']
 
 
 def ensure_venv():
@@ -103,6 +154,9 @@ def main():
     if not MANAGE.exists():
         print('[x] 未找到 server/manage.py，请在项目根目录运行本脚本。')
         sys.exit(1)
+
+    # 在启动前确保配置存在（或注入环境变量）
+    ensure_config_interactive()
 
     vpy = ensure_venv()
     run_migrate(vpy)

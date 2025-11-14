@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import re
 from pathlib import Path
 import shutil
 import threading
@@ -117,14 +118,23 @@ def _resolve_slt_summary_root(user_root: str | None = None) -> Path:
     优先顺序：
     1) 用户传入的 `user_root`
     2) 环境变量 `SLT_SUMMARY_ROOT`
-    3) 默认 UNC：\\172.33.10.11\SLT_Summary
+    3) 项目配置 `config/config.json`（通过工具读取）
 
-    说明：在 macOS 上默认 UNC 路径不可直接访问，建议使用 Finder 挂载共享盘，或设置
-    环境变量 SLT_SUMMARY_ROOT 指向本地挂载点（例如 /Volumes/SLT_Summary）。
+    说明：建议在项目根目录的 `config/config.json` 中填写 `SLT_SUMMARY_ROOT`，
+    或在系统环境变量中设置同名变量，避免在代码中硬编码共享盘地址。
     """
-    raw = (user_root or os.environ.get('SLT_SUMMARY_ROOT') or r"\\172.33.10.11\SLT_Summary").strip()
-    p = Path(raw)
-    return p
+    # 延迟导入，避免工具不存在时影响其它功能
+    try:
+        from tools.config_loader import get_config
+    except Exception:
+        def get_config(k, default=None):
+            return os.environ.get(k, default)
+
+    raw = (user_root or get_config('SLT_SUMMARY_ROOT') or '').strip()
+    # 若未配置，返回一个必然不存在的占位路径，后续会给出友好提示
+    if not raw:
+        return BASE_ROOT / '__MISSING_SLT_SUMMARY_ROOT__'
+    return Path(raw)
 
 
 def _copy_with_collision(src: Path, dest_dir: Path) -> str:
@@ -165,7 +175,7 @@ def api_sum_prepare(request):
     请求（POST JSON）：
     {
       "lot_names": ["smx", "lot2"],  // 不区分大小写，作为文件名包含判断
-      "source_root": "\\\\172.33.10.11\\SLT_Summary" // 可选，若不传则走环境变量或默认 UNC
+      "source_root": "//server/SLT_Summary" // 可选；留空则读取 config 或环境变量
     }
 
     过滤规则：
@@ -181,6 +191,14 @@ def api_sum_prepare(request):
         body = json.loads(request.body or '{}')
         lot_names = body.get('lot_names') or []
         source_root = body.get('source_root')
+        # 新增：近 N 天过滤（整数，单位：天）。不填则全量扫描
+        try:
+            recent_days = int(body.get('recent_days')) if body.get('recent_days') is not None else None
+            if isinstance(recent_days, int) and recent_days <= 0:
+                recent_days = None
+        except Exception:
+            recent_days = None
+        threshold_ts = (time.time() - recent_days * 86400) if isinstance(recent_days, int) else None
         if not isinstance(lot_names, list) or not lot_names:
             return JsonResponse({'ok': False, 'error': '请提供至少一个 lot 名（数组）'})
 
@@ -200,39 +218,71 @@ def api_sum_prepare(request):
 
         src_root = _resolve_slt_summary_root(source_root)
         if not src_root.exists() or not src_root.is_dir():
-            return JsonResponse({'ok': False, 'error': f'源目录不可访问：{src_root}. 请挂载共享盘或设置环境变量 SLT_SUMMARY_ROOT。'})
+            return JsonResponse({'ok': False, 'error': f'源目录不可访问：{src_root}. 请在 config/config.json 设置 SLT_SUMMARY_ROOT 或配置环境变量 SLT_SUMMARY_ROOT。'})
 
         # 结果统计
         stats = {ln: {'copied': 0, 'dest': str(LOTS_DIR / ln)} for ln in norm_lots}
 
-        # 递归扫描并复制
-        exclude_pat = ('eng', 'spc')
+        # 性能优化：
+        # - 使用 os.scandir 遍历提升目录性能
+        # - 预编译正则进行匹配（不区分大小写）
+        # - 使用线程池并行复制，大幅提高 I/O 吞吐
+        exclude_re = re.compile(r'(eng|spc)', re.IGNORECASE)
+        lots_re = re.compile(r'(?:' + '|'.join(map(re.escape, norm_lots)) + r')', re.IGNORECASE)
         valid_ext = ('.sum', '.txt')
-        for root, _dirs, files in os.walk(src_root):
-            for fname in files:
-                lower = fname.lower()
-                # 扩展名过滤
-                if not lower.endswith(valid_ext):
-                    continue
-                # 排除 ENG/SPC
-                if any(k in lower for k in exclude_pat):
-                    continue
-                # lot 名包含判断
-                matched = None
-                for ln in norm_lots:
-                    if ln in lower:
-                        matched = ln
-                        break
-                if not matched:
-                    continue
-                src_file = Path(root) / fname
-                dest_dir = LOTS_DIR / matched
+
+        from concurrent.futures import ThreadPoolExecutor
+        lock = threading.Lock()
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            stack = [src_root]
+            while stack:
+                base = stack.pop()
                 try:
-                    final_name = _copy_with_collision(src_file, dest_dir)
-                    stats[matched]['copied'] += 1
+                    with os.scandir(base) as it:
+                        for entry in it:
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(Path(entry.path))
+                                continue
+                            if not entry.is_file(follow_symlinks=False):
+                                continue
+                            # 若设置了近 N 天过滤，使用 mtime 过滤较早文件
+                            if threshold_ts is not None:
+                                try:
+                                    st = entry.stat(follow_symlinks=False)
+                                    if st.st_mtime < threshold_ts:
+                                        continue
+                                except Exception:
+                                    # 获取 stat 失败则不进行 mtime 过滤
+                                    pass
+                            name = entry.name
+                            lower = name.lower()
+                            # 扩展名过滤（使用 endswith 更快）
+                            if not lower.endswith(valid_ext):
+                                continue
+                            # 排除 ENG/SPC（正则一次性判断）
+                            if exclude_re.search(name):
+                                continue
+                            # lot 名匹配（预编译正则）
+                            m = lots_re.search(name)
+                            if not m:
+                                continue
+                            matched = m.group(0).lower()
+                            src_file = Path(entry.path)
+                            dest_dir = LOTS_DIR / matched
+
+                            def _copy_one(src=src_file, dest=dest_dir, ln=matched):
+                                try:
+                                    _ = _copy_with_collision(src, dest)
+                                    with lock:
+                                        stats[ln]['copied'] += 1
+                                except Exception:
+                                    # 忽略单个复制错误
+                                    pass
+
+                            pool.submit(_copy_one)
                 except Exception:
-                    # 忽略单个复制错误，继续扫描
-                    pass
+                    # 忽略单个目录的扫描错误，继续
+                    continue
 
         return JsonResponse({'ok': True, 'stats': stats, 'source_root': str(src_root)})
     except Exception as exc:
@@ -246,7 +296,7 @@ def api_sum_prepare(request):
 PREPARE_JOBS = {}
 
 class PrepareJob:
-    def __init__(self, job_id: str, norm_lots: list[str], src_root: Path):
+    def __init__(self, job_id: str, norm_lots: list[str], src_root: Path, threshold_ts: float | None = None):
         self.job_id = job_id
         self.norm_lots = norm_lots
         self.src_root = src_root
@@ -261,6 +311,11 @@ class PrepareJob:
         self._lock = threading.Lock()
         self._cancel = False
         self._thread = None
+        self.threshold_ts = threshold_ts
+        # 预编译匹配规则
+        self.exclude_re = re.compile(r'(eng|spc)', re.IGNORECASE)
+        self.lots_re = re.compile(r'(?:' + '|'.join(map(re.escape, norm_lots)) + r')', re.IGNORECASE)
+        self.valid_ext = ('.sum', '.txt')
 
     def to_dict(self):
         with self._lock:
@@ -284,7 +339,7 @@ class PrepareJob:
 
 def _prepare_worker(job: PrepareJob):
     exclude_pat = ('eng', 'spc')
-    valid_ext = ('.sum', '.txt')
+    valid_ext = job.valid_ext
     try:
         # 使用 os.scandir 提升目录遍历性能；复制阶段使用线程池并行 I/O
         with ThreadPoolExecutor(max_workers=4) as pool:
@@ -301,19 +356,25 @@ def _prepare_worker(job: PrepareJob):
                                 continue
                             if not entry.is_file(follow_symlinks=False):
                                 continue
+                            # 若设置了近 N 天过滤，使用 mtime 过滤较早文件
+                            if job.threshold_ts is not None:
+                                try:
+                                    st = entry.stat(follow_symlinks=False)
+                                    if st.st_mtime < job.threshold_ts:
+                                        continue
+                                except Exception:
+                                    pass
                             name = entry.name
                             lower = name.lower()
                             # 扩展名过滤
                             if not lower.endswith(valid_ext):
                                 continue
                             # 排除 ENG/SPC
-                            if any(k in lower for k in exclude_pat):
+                            # 使用预编译正则更高效
+                            if job.exclude_re.search(name):
                                 continue
-                            matched = None
-                            for ln in job.norm_lots:
-                                if ln in lower:
-                                    matched = ln
-                                    break
+                            m = job.lots_re.search(name)
+                            matched = m.group(0).lower() if m else None
                             with job._lock:
                                 job.scanned_files += 1
                             if not matched:
@@ -358,6 +419,14 @@ def api_sum_prepare_start(request):
         body = {}
     lot_names = body.get('lot_names') or []
     source_root = body.get('source_root')
+    # 新增：近 N 天过滤（整数，单位：天）。不填则全量扫描
+    try:
+        recent_days = int(body.get('recent_days')) if body.get('recent_days') is not None else None
+        if isinstance(recent_days, int) and recent_days <= 0:
+            recent_days = None
+    except Exception:
+        recent_days = None
+    threshold_ts = (time.time() - recent_days * 86400) if isinstance(recent_days, int) else None
     if not isinstance(lot_names, list) or not lot_names:
         return JsonResponse({'ok': False, 'error': '请提供至少一个 lot 名（数组）'})
 
@@ -377,10 +446,10 @@ def api_sum_prepare_start(request):
 
     src_root = _resolve_slt_summary_root(source_root)
     if not src_root.exists() or not src_root.is_dir():
-        return JsonResponse({'ok': False, 'error': f'源目录不可访问：{src_root}. 请挂载共享盘或设置环境变量 SLT_SUMMARY_ROOT。'})
+        return JsonResponse({'ok': False, 'error': f'源目录不可访问：{src_root}. 请在 config/config.json 设置 SLT_SUMMARY_ROOT 或配置环境变量 SLT_SUMMARY_ROOT。'})
 
     job_id = uuid.uuid4().hex
-    job = PrepareJob(job_id, norm_lots, src_root)
+    job = PrepareJob(job_id, norm_lots, src_root, threshold_ts)
     PREPARE_JOBS[job_id] = job
     t = threading.Thread(target=_prepare_worker, args=(job,), daemon=True)
     job._thread = t

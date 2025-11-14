@@ -1,6 +1,7 @@
 import os
 import zipfile  # 用于解压缩 zip 文件
 import re #引入正则表达式
+from tools.config_loader import get_config
 
 class mappingNameCheck():  # 要加上self归类
     def __init__(self, TP):
@@ -16,9 +17,12 @@ class mappingNameCheck():  # 要加上self归类
         return bool(patten.match(fileName))
     # 一、获取 mapping name
     def get_mapping_name(self):
-        # 1. 指定文件夹路径 - 根路径 3270文件夹
-        directory_path = r"\\172.33.10.11\3270"
-        # 2. 查找mapping文件 "\\172.33.10.11\3270\中符合 TP 的文件或文件夹有哪些"
+        # 1. 指定文件夹路径 - 根路径 3270 文件夹（读取配置或环境变量 MAPPING_ROOT）
+        directory_path = get_config('MAPPING_ROOT') or ''
+        if not directory_path:
+            print("请在 config/config.json 设置 MAPPING_ROOT 或配置环境变量 MAPPING_ROOT")
+            return
+        # 2. 查找 mapping 文件：在 MAPPING_ROOT 下符合 TP 的文件或文件夹有哪些
         files = [f for f in os.listdir(directory_path) if self.TP in f]  # 列表推导式
         # 3. 遍历文件列表
         for file in files:
