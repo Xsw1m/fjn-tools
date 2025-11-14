@@ -1,4 +1,11 @@
 # 需求文档：SUM 文件整合生成 xlsx 总结工具
+版本：v1.2.0（2025-11-14）
+
+更新摘要：
+- 新增“准备与清理”前置功能说明：支持从网络目录按 lot 名筛选复制 SUM 文件到 `lots/`，以及一键清除 `lots/` 下的子目录。
+- 补充后端接口：`POST /api/sum/prepare` 与 `POST /api/sum/clear` 的请求与返回格式。
+- 前端交互采用分步流程（SumWizard）：先准备，再生成 xlsx；在步骤一即可清除旧数据。
+- 新增可选“TpName 过滤”步骤：可勾选是否按 Program ID（TpName）过滤；启用后仅统计 Program ID 与用户输入 TpName 精确匹配的 SUM 文件。
 
 ## 一、工具目标
 
@@ -9,6 +16,14 @@
 - 根目录存在`lots`文件夹，其下包含多个以`lot+数字`命名的子文件夹（如 lot1、lot2）。
 - 每个 lot 子文件夹下包含多个 SUM 文件，文件名为`[前缀]_[时间戳].txt`（如 AT1_081125_040616.txt）。
 - 时间戳格式为`MMDDYY_HHmmss`，解析为**25 年 MM 月 DD 日\_HH 点 mm 分 ss 秒**（如 081125_040616 表示 25 年 11 月 08 日\_04 点 06 分 16 秒），用于判断文件生成时间的先后顺序，解析需精确到秒以保证排序准确性。
+
+附：准备与清理（前置步骤）
+- 准备：根据用户输入的多个 lot 名，从源目录（默认 `\\172.33.10.11\SLT_Summary`，可由环境变量 `SLT_SUMMARY_ROOT` 指定本地挂载路径）递归筛选复制到 `lots/lot_name/`。
+  - 仅复制扩展名为 `.SUM` 或 `.txt` 的文件；
+  - 文件名需包含任意一个 lot 名（不区分大小写）；
+  - 文件名包含 `ENG` 或 `SPC`（不区分大小写）则排除；
+  - 若发生重名，目标文件自动添加 `(1)`, `(2)` 等后缀避免覆盖。
+- 清理：一键删除 `lots/` 下所有子文件夹及其内容（或按 `lot_names` 指定要清理的子目录）。
 
 ## 三、数据提取与时间判断规则
 
@@ -74,6 +89,47 @@
 
 ---
 
+## 七、前置接口与分步流程（新增 v1.1.0）
+
+为保证“lots/”数据来源一致、可控，新增“准备与清理”接口与分步交互（SumWizard）：
+
+- 接口一：`POST /api/sum/prepare`
+  - 请求体：`{ lot_names: string[], source_root?: string }`
+  - 行为：从源目录递归筛选符合规则的 SUM 文件，按 lot 名复制到 `lots/lot_name/`。
+  - 过滤规则：扩展名为 `.SUM`/`.txt`；文件名包含任一 lot 名；排除包含 `ENG` 或 `SPC` 的文件名（不区分大小写）。
+  - 返回示例：`{ ok: true, stats: { smx: { copied: 12, dest: ".../lots/smx" } }, source_root: "..." }`
+
+- 接口二：`POST /api/sum/clear`
+  - 请求体：`{ lots_dir?: string, lot_names?: string[] }`
+  - 行为：删除 `lots_dir`（默认 `lots`）下的所有子文件夹及其内容；若指定 `lot_names`，仅清理匹配的子目录。
+  - 返回示例：`{ ok: true, removed: ["lot1","lot2"], deleted_dirs: 3, deleted_files: 42, target: ".../lots" }`
+
+- 前端流程（SumWizard）：
+  - 步骤一：输入 lot 名 → 可先“清除 lots” → 执行“准备”（筛选复制）。
+  - 步骤二（新增，可选）：勾选“按 TpName 过滤”开关；如勾选，需填写 `TpName`（即 Program ID）。
+  - 步骤三：确认 `lots` 路径 → 生成 xlsx 并下载。
+
+> 说明：准备与清理为可选前置步骤；聚合与生成 xlsx 的核心逻辑保持不变，仍按本文档第三～五部分说明执行。
+
+## 八、TpName 过滤规则（新增 v1.2.0）
+
+当用户在步骤二勾选“按 TpName 过滤”并输入 `TpName` 时：
+- 过滤范围：仅纳入 Program ID（TpName）与用户输入值相同的 SUM 文件参与统计；不相同的文件全部跳过。
+- 匹配规则：去除首尾空格后进行精确匹配（不区分大小写）。
+- 数据影响：
+  - `Total`：改为取每个 lot 在“匹配集合”中最老文件的 `TotalPass + TotalFail`；若某 lot 无匹配文件，则该 lot 的 `Total` 视为 0（或留空，按实现展示）。
+  - `TotalPass`：仅统计“匹配集合”中所有文件的 `TotalPass` 之和。
+  - `TotalFail`：`Total - TotalPass`，保持非负。
+  - `Category_BIN`：在“匹配集合”范围内适用既有规则（BIN=1/4 汇总所有匹配文件的 COUNT，BIN=2/3/5 取匹配集合中最新文件的 COUNT）。
+  - `error` 标记：仍以匹配集合中同一 lot 的文件为准，若同一 `category` 的 BIN 等级在不同匹配文件中不一致，则该 lot 单元格标记为 `error`。
+- remark 解析：
+  - 优先从“匹配集合”任意 lot 的最新文件获取 `TpName` 用于 Mapping；若过滤后匹配集合为空或缺少 Program ID，`remark` 兜底规则生效（如“没找到 Program ID”）。
+- 容错与提示：
+  - 若过滤启用但没有任何匹配文件，前端应提示“未找到匹配 Program ID 的文件”，并允许用户返回修改或取消过滤。
+
+当未勾选过滤时：
+- 行为与 v1.1.0 保持一致，即不进行 TpName 过滤，统计范围为所有 SUM 文件。
+
 # 给 Cursor 的提示词
 
 请生成一个 Python 小工具，用于整合`lots`文件夹下的所有 SUM 文件并生成总结 xlsx。具体需求如下：
@@ -95,3 +151,8 @@
 4. **生成 xlsx**：按照指定格式生成 xlsx，列包含各 lot 名称、`sum`（正整数）、`rate`（百分比，两位小数）、`remark`（由 `TpName` 的 Mapping 解析得到的 `category` 描述）；行包含`Total`（整数）、`TotalPass`（整数）、`TotalFail`（非负整数）及各`Category_BIN`条目（数值为正整数或“error”，对应行的 `remark` 为该 `category` 的描述）。
 
 请使用`pandas`库处理数据，`openpyxl`或`xlsxwriter`处理 Excel 生成，确保代码结构清晰、有必要的注释，并处理可能的异常（如文件读取错误、字段缺失、Total 不一致等）。
+
+5. **可选 TpName（Program ID）过滤**：
+   - 若启用过滤，仅对 Program ID 与用户输入的 `TpName` 精确匹配（不区分大小写，忽略首尾空格）的 SUM 文件进行统计；未匹配的文件跳过。
+   - 过滤启用时，所有统计（`Total`/`TotalPass`/`TotalFail` 与 `Category_BIN`）均基于“匹配集合”；若某 lot 无匹配文件，其对应列可视为 0 或留空。
+   - remark 的 Mapping 解析优先从“匹配集合”任意 lot 的最新文件获取 `TpName`；若匹配集合为空或缺少 Program ID，则应用兜底提示。

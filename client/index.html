@@ -3,13 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SUM Aggregator 前端</title>
+    <title>工具门户 | SUM Aggregator</title>
     <style>
       :root { --primary: #2563eb; --gray:#6b7280; }
       body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', Arial, sans-serif; padding: 24px; background:#fafafa; }
       .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; max-width: 720px; margin: 0 auto; background:white; box-shadow: 0 6px 16px rgba(0,0,0,0.06); }
       h2 { margin: 0 0 8px; }
       p { margin: 0 0 16px; color:#374151; }
+      /* 通用注释样式：小一号字体、灰色 */
+      .comment { font-size: 13px; color: var(--gray); margin-top: 8px; }
       label { display:block; font-weight:600; margin-bottom: 6px; }
       .row { display:flex; gap:10px; align-items:center; }
       input[type=text] { flex:1; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; }
@@ -28,10 +30,10 @@
   <body>
     <div id="app"></div>
     <script type="text/babel">
-      const { useState } = React;
+      const { useState, useEffect } = React;
 
-      function App() {
-        // 使用相对路径，确保在不同机器上都指向项目内的 lots 目录
+      // SUM 工具组件（原有 UI 抽取）
+      function SumTool() {
         const [path, setPath] = useState('lots');
         const [showPicker, setShowPicker] = useState(false);
         const [browsePath, setBrowsePath] = useState('lots');
@@ -96,7 +98,6 @@
         };
 
         const goUp = async () => {
-          // 兼容 Windows 和 Unix 路径分隔符
           const slashIdx = browsePath.lastIndexOf('/');
           const backIdx = browsePath.lastIndexOf('\\');
           const idx = Math.max(slashIdx, backIdx);
@@ -114,8 +115,11 @@
 
         return (
           <div className="card">
-            <h2>SUM Aggregator</h2>
-            <p>输入 lots 目录路径，点击生成 xlsx。会自动避免重名（如 result(1).xlsx）。</p>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <h2 style={{margin:0}}>SUM Aggregator</h2>
+              <a href="#/" style={{color:'#2563eb',textDecoration:'none'}}>← 返回门户</a>
+            </div>
+            <p className="comment">输入 lots 目录路径，点击生成 xlsx。会自动避免重名（如 result(1).xlsx）。</p>
             <label htmlFor="lotsPath">lots 路径</label>
             <div className="row">
               <input id="lotsPath" type="text" value={path} onChange={e => setPath(e.target.value)} placeholder="lots" />
@@ -152,6 +156,345 @@
             )}
           </div>
         );
+      }
+
+      // 门户页面（工具列表）
+      function Portal() {
+        const toolCard = {
+          display:'flex',alignItems:'center',gap:16,padding:'14px 16px',border:'1px solid #e5e7eb',borderRadius:12,background:'#fff',
+          boxShadow:'0 6px 16px rgba(0,0,0,0.06)',cursor:'pointer',textDecoration:'none',color:'#111827'
+        };
+        return (
+          <div className="card">
+            <h2 style={{marginTop:0}}>工具门户</h2>
+            <p className="comment">选择一个工具进入。后续可以在这里继续增加更多小工具。</p>
+            <div style={{display:'grid',gridTemplateColumns:'1fr',gap:12}}>
+              <a href="#/sum-wizard" style={toolCard} title="SUM 工具（准备 + 生成）">
+                <span style={{fontSize:24}}>🧭</span>
+                <div>
+                  <div style={{fontWeight:600}}>SUM 工具</div>
+                  <div style={{color:'#6b7280',fontSize:13}}>先输入 lot 名筛选复制，再生成 xlsx</div>
+                </div>
+              </a>
+              {/* 预留：更多工具入口可以继续添加 */}
+            </div>
+          </div>
+        );
+      }
+
+      // 第一步：准备 SUM 文件（输入多个 lot 名并筛选复制）
+      function PrepareLots() {
+        const [sourceRoot, setSourceRoot] = useState('\\\\172.33.10.11\\SLT_Summary');
+        const [inputVal, setInputVal] = useState('');
+        const [lots, setLots] = useState([]);
+        const [status, setStatus] = useState('');
+        const [stats, setStats] = useState(null);
+        const addLot = () => {
+          const v = (inputVal || '').trim();
+          if (!v) return;
+          const exists = lots.some(x => x.toLowerCase() === v.toLowerCase());
+          if (exists) { setStatus('该 lot 已在列表中'); return; }
+          setLots([...lots, v]);
+          setInputVal('');
+          setStatus('已添加');
+        };
+        const removeLot = (idx) => {
+          const next = lots.slice(); next.splice(idx,1); setLots(next);
+        };
+        const startPrepare = async () => {
+          if (!lots.length) { setStatus('请先添加至少一个 lot 名'); return; }
+          setStatus('正在筛选并复制...'); setStats(null);
+          try {
+            const res = await fetch('/api/sum/prepare', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ lot_names: lots, source_root: sourceRoot })
+            });
+            const data = await res.json();
+            if (data.ok) {
+              setStats(data.stats || {});
+              const total = Object.values(data.stats || {}).reduce((s, v) => s + (v.copied||0), 0);
+              setStatus(`完成：共复制 ${total} 个文件到 lots/ 下`);
+            } else {
+              setStatus('失败：' + (data.error || '未知错误'));
+            }
+          } catch (e) {
+            setStatus('失败：' + e.message);
+          }
+        };
+        return (
+          <div className="card">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <h2 style={{margin:0}}>准备 SUM 文件</h2>
+              <a href="#/" style={{color:'#2563eb',textDecoration:'none'}}>← 返回门户</a>
+            </div>
+            <p className="comment">第一步：输入多个 lot 名，点击“开始筛选复制”，从 SLT_Summary 递归查找匹配的 SUM 文件并复制到 lots/lotName。</p>
+            <label htmlFor="srcRoot">源目录（可选，默认 UNC 或环境变量）</label>
+            <div className="row" style={{marginBottom:8}}>
+              <input id="srcRoot" type="text" value={sourceRoot} onChange={e=>setSourceRoot(e.target.value)} placeholder="\\\\172.33.10.11\\SLT_Summary" />
+            </div>
+            <label htmlFor="lotName">lot 名（不区分大小写）</label>
+            <div className="row">
+              <input id="lotName" type="text" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="例如：smx" />
+              <button onClick={addLot}>添加</button>
+            </div>
+            {!!lots.length && (
+              <div style={{marginTop:10}}>
+                <div className="comment">已添加的 lot：</div>
+                {lots.map((v, i) => (
+                  <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0'}}>
+                    <span>• {v}</span>
+                    <button className="secondary" onClick={()=>removeLot(i)}>删除</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{display:'flex',gap:10,marginTop:10}}>
+              <button onClick={startPrepare}>开始筛选复制</button>
+              <a href="#/sum" style={{alignSelf:'center',color:'#2563eb',textDecoration:'none'}}>前往生成 xlsx →</a>
+            </div>
+            <div className="status">{status}</div>
+            {stats && (
+              <div style={{marginTop:10}}>
+                <div className="comment">复制结果：</div>
+                {Object.entries(stats).map(([lot, info]) => (
+                  <div key={lot} className="comment">{lot} → {info.copied} 个文件，目标：{info.dest}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // 一体化流程：先准备（筛选复制），再汇总生成 xlsx
+      function SumWizard() {
+        const [sourceRoot, setSourceRoot] = useState('\\\\172.33.10.11\\SLT_Summary');
+        const [inputVal, setInputVal] = useState('');
+        const [lots, setLots] = useState([]);
+        const [prepareStats, setPrepareStats] = useState(null);
+        const [prepareStatus, setPrepareStatus] = useState('');
+        const [lotsPath, setLotsPath] = useState('lots');
+        const [runStatus, setRunStatus] = useState('');
+        const [downloadUrl, setDownloadUrl] = useState('');
+        const [step, setStep] = useState(1);
+        // 新增：TpName（Program ID）过滤控制
+        const [enableTpFilter, setEnableTpFilter] = useState(false);
+        const [tpName, setTpName] = useState('');
+
+        const addLot = () => {
+          const v = (inputVal || '').trim();
+          if (!v) return;
+          const exists = lots.some(x => x.toLowerCase() === v.toLowerCase());
+          if (exists) { setPrepareStatus('该 lot 已在列表中'); return; }
+          setLots([...lots, v]);
+          setInputVal('');
+          setPrepareStatus('已添加');
+        };
+        const removeLot = (idx) => {
+          const next = lots.slice(); next.splice(idx,1); setLots(next);
+        };
+        const startPrepare = async () => {
+          if (!lots.length) { setPrepareStatus('请先添加至少一个 lot 名'); return; }
+          setPrepareStatus('正在筛选并复制...'); setPrepareStats(null); setRunStatus(''); setDownloadUrl('');
+          try {
+            const res = await fetch('/api/sum/prepare', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ lot_names: lots, source_root: sourceRoot })
+            });
+            const data = await res.json();
+            if (data.ok) {
+              setPrepareStats(data.stats || {});
+              const total = Object.values(data.stats || {}).reduce((s, v) => s + (v.copied||0), 0);
+              setPrepareStatus(`完成：共复制 ${total} 个文件到 lots/ 下`);
+              setLotsPath('lots');
+              // 完成后允许进入下一步
+              if (total > 0) {
+                // 不自动跳转，交给用户点击“下一步”
+              }
+            } else {
+              setPrepareStatus('失败：' + (data.error || '未知错误'));
+            }
+          } catch (e) {
+            setPrepareStatus('失败：' + e.message);
+          }
+        };
+        const run = async () => {
+          if (!lotsPath || !lotsPath.trim()) { setRunStatus('请先填写 lots 目录路径'); return; }
+          setRunStatus('正在生成 xlsx ...'); setDownloadUrl('');
+          try {
+            const payload = { lots_dir: lotsPath };
+            if (enableTpFilter && (tpName || '').trim()) {
+              payload.use_tp_filter = true;
+              payload.tp_name = tpName.trim();
+            } else {
+              payload.use_tp_filter = false;
+            }
+            const res = await fetch('/api/sum/run', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.ok) {
+              setRunStatus(`已在根目录下的 exports 文件夹下成功生成：${data.filename}`);
+              setDownloadUrl(data.download_url);
+            } else {
+              setRunStatus('生成失败：' + (data.error || '未知错误'));
+            }
+          } catch (e) {
+            setRunStatus('生成失败：' + e.message);
+          }
+        };
+        const clearAllLots = async () => {
+          if (!lotsPath || !lotsPath.trim()) { setPrepareStatus('请先填写 lots 目录路径'); return; }
+          setPrepareStatus('正在清除 lots 下的子目录 ...'); setPrepareStats(null);
+          try {
+            const res = await fetch('/api/sum/clear', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ lots_dir: lotsPath })
+            });
+            const data = await res.json();
+            if (data.ok) {
+              const removedCount = (data.removed || []).length;
+              setPrepareStatus(`清除完成：移除 ${removedCount} 个 lot 目录（文件 ${data.deleted_files}）`);
+            } else {
+              setPrepareStatus('清除失败：' + (data.error || '未知错误'));
+            }
+          } catch (e) {
+            setPrepareStatus('清除失败：' + e.message);
+          }
+        };
+        const clearLots = async () => {
+          if (!lotsPath || !lotsPath.trim()) { setRunStatus('请先填写 lots 目录路径'); return; }
+          setRunStatus('正在清除 lots 下的子文件夹 ...'); setDownloadUrl('');
+          try {
+            const res = await fetch('/api/sum/clear', {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({ lots_dir: lotsPath })
+            });
+            const data = await res.json();
+            if (data.ok) {
+              const removedCount = (data.removed || []).length;
+              setRunStatus(`清除完成：移除 ${removedCount} 个 lot 目录（文件 ${data.deleted_files}）`);
+              setPrepareStats(null);
+              setPrepareStatus('');
+              setDownloadUrl('');
+            } else {
+              setRunStatus('清除失败：' + (data.error || '未知错误'));
+            }
+          } catch (e) {
+            setRunStatus('清除失败：' + e.message);
+          }
+        };
+        // 计算是否可以下一步
+        const canNext = (() => {
+          if (!prepareStats) return false;
+          try {
+            const total = Object.values(prepareStats).reduce((s, v) => s + (v.copied||0), 0);
+            return total > 0;
+          } catch { return false; }
+        })();
+
+        return (
+          <div className="card">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <h2 style={{margin:0}}>SUM 一体化流程</h2>
+              <a href="#/" style={{color:'#2563eb',textDecoration:'none'}}>← 返回门户</a>
+            </div>
+            <p className="comment">先输入多个 lot 名并从源目录递归筛选复制到 lots/，再生成 xlsx。</p>
+            {step === 1 && (
+              <div>
+                <h3 style={{margin:'16px 0 8px'}}>步骤一：准备 SUM 文件</h3>
+                <label htmlFor="srcRoot">源目录（可选，默认 UNC 或环境变量）</label>
+                <div className="row" style={{marginBottom:8}}>
+                  <input id="srcRoot" type="text" value={sourceRoot} onChange={e=>setSourceRoot(e.target.value)} placeholder="\\\\172.33.10.11\\SLT_Summary" />
+                </div>
+                <label htmlFor="lotName">lot 名（不区分大小写）</label>
+                <div className="row">
+                  <input id="lotName" type="text" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="例如：smx" />
+                  <button onClick={addLot}>添加</button>
+                </div>
+                {!!lots.length && (
+                  <div style={{marginTop:10}}>
+                    <div className="comment">已添加的 lot：</div>
+                    {lots.map((v, i) => (
+                      <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0'}}>
+                        <span>• {v}</span>
+                        <button className="secondary" onClick={()=>removeLot(i)}>删除</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="row" style={{marginTop:12}}>
+                  <button onClick={clearAllLots} className="secondary" title="删除 lots 下所有子目录及其内容">清除 lots</button>
+                </div>
+                <div style={{display:'flex',gap:10,marginTop:10}}>
+                  <button onClick={startPrepare}>开始筛选复制</button>
+                  <button onClick={()=>setStep(2)} disabled={!canNext}>下一步</button>
+                </div>
+                <div className="status">{prepareStatus}</div>
+                {prepareStats && (
+                  <div style={{marginTop:10}}>
+                    <div className="comment">复制结果：</div>
+                    {Object.entries(prepareStats).map(([lot, info]) => (
+                      <div key={lot} className="comment">{lot} → {info.copied} 个文件，目标：{info.dest}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {step === 2 && (
+              <div>
+                <h3 style={{margin:'16px 0 8px'}}>步骤二：可选的 TpName 过滤</h3>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <input id="tpFilterEnable" type="checkbox" checked={enableTpFilter} onChange={e=>setEnableTpFilter(e.target.checked)} />
+                  <label htmlFor="tpFilterEnable" style={{margin:0}}>按 Program ID（TpName）过滤</label>
+                </div>
+                <div className="row" style={{marginTop:8}}>
+                  <input id="tpName" type="text" disabled={!enableTpFilter} value={tpName} onChange={e=>setTpName(e.target.value)} placeholder="例如：TP-ABC-001" />
+                </div>
+                <div className="comment" style={{marginTop:8}}>
+                  启用过滤后，仅统计 Program ID 与输入 TpName 精确匹配（不区分大小写）的 SUM 文件；不匹配的文件将被跳过。
+                </div>
+                <div style={{display:'flex',gap:10,marginTop:10}}>
+                  <button className="secondary" onClick={()=>setStep(1)}>上一步</button>
+                  <button onClick={()=>setStep(3)}>下一步</button>
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div>
+                <h3 style={{margin:'16px 0 8px'}}>步骤三：生成 xlsx</h3>
+                <label htmlFor="lotsPath">lots 路径</label>
+                <div className="row">
+                  <input id="lotsPath" type="text" value={lotsPath} onChange={e=>setLotsPath(e.target.value)} placeholder="lots" />
+                  <button onClick={()=>setLotsPath('lots')} className="secondary">默认</button>
+                  <button onClick={clearLots} className="secondary" title="删除 lots 下所有子目录及其内容">清除</button>
+                  <button onClick={run}>生成 xlsx</button>
+                </div>
+                <div style={{display:'flex',gap:10,marginTop:10}}>
+                  <button className="secondary" onClick={()=>setStep(2)}>上一步</button>
+                </div>
+                <div className="status">{runStatus}</div>
+                {downloadUrl && <div className="link"><a href={downloadUrl} target="_blank" rel="noreferrer">🤔找不到？另存为</a></div>}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // 简易哈希路由
+      function App() {
+        const [route, setRoute] = useState(window.location.hash || '#/');
+        useEffect(() => {
+          const onHash = () => setRoute(window.location.hash || '#/');
+          window.addEventListener('hashchange', onHash);
+          return () => window.removeEventListener('hashchange', onHash);
+        }, []);
+        if (route.startsWith('#/prepare')) return <PrepareLots/>;
+        if (route.startsWith('#/sum-wizard')) return <SumWizard/>;
+        if (route.startsWith('#/sum')) return <SumTool/>;
+        return <Portal/>;
       }
 
       ReactDOM.createRoot(document.getElementById('app')).render(<App/>);

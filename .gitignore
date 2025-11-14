@@ -26,3 +26,7 @@ client/.cache/
 .env
 .coverage
 .pytest_cache/
+
+# Demo
+demo/
+lots/

@@ -2,6 +2,7 @@ import os
 import json
 import sys
 from pathlib import Path
+import shutil
 
 from django.http import HttpResponse, JsonResponse, FileResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -14,6 +15,8 @@ EXPORTS_DIR = BASE_ROOT / 'exports'
 EXPORTS_DIR.mkdir(exist_ok=True)
 UPLOADS_DIR = BASE_ROOT / 'uploads'
 UPLOADS_DIR.mkdir(exist_ok=True)
+LOTS_DIR = BASE_ROOT / 'lots'
+LOTS_DIR.mkdir(exist_ok=True)
 
 # 让 Python 能导入根目录下的 tools 包（tools/calcSumXlsx/sum_aggregator.py）
 if str(BASE_ROOT) not in sys.path:
@@ -104,6 +107,39 @@ def _list_dir(p: Path):
     return children
 
 
+def _resolve_slt_summary_root(user_root: str | None = None) -> Path:
+    """解析 SLT_Summary 根目录。
+
+    优先顺序：
+    1) 用户传入的 `user_root`
+    2) 环境变量 `SLT_SUMMARY_ROOT`
+    3) 默认 UNC：\\172.33.10.11\SLT_Summary
+
+    说明：在 macOS 上默认 UNC 路径不可直接访问，建议使用 Finder 挂载共享盘，或设置
+    环境变量 SLT_SUMMARY_ROOT 指向本地挂载点（例如 /Volumes/SLT_Summary）。
+    """
+    raw = (user_root or os.environ.get('SLT_SUMMARY_ROOT') or r"\\172.33.10.11\SLT_Summary").strip()
+    p = Path(raw)
+    return p
+
+
+def _copy_with_collision(src: Path, dest_dir: Path) -> str:
+    """将文件复制到目标目录，若重名则自动添加 (1), (2) ... 后缀，返回最终文件名。"""
+    import shutil
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    base = src.name
+    name, ext = os.path.splitext(base)
+    candidate = base
+    idx = 1
+    dest = dest_dir / candidate
+    while dest.exists():
+        candidate = f"{name}({idx}){ext}"
+        dest = dest_dir / candidate
+        idx += 1
+    shutil.copy2(str(src), str(dest))
+    return candidate
+
+
 def api_fs_list(request):
     """列出目录内容。默认浏览 lots 目录。"""
     path = request.GET.get('path') or str(BASE_ROOT / 'lots')
@@ -119,6 +155,87 @@ def api_fs_list(request):
 
 
 @csrf_exempt
+def api_sum_prepare(request):
+    """第一步：根据用户输入的多个 lot 名，从 SLT_Summary 递归筛选 SUM 文件并复制到 lots/ 下。
+
+    请求（POST JSON）：
+    {
+      "lot_names": ["smx", "lot2"],  // 不区分大小写，作为文件名包含判断
+      "source_root": "\\\\172.33.10.11\\SLT_Summary" // 可选，若不传则走环境变量或默认 UNC
+    }
+
+    过滤规则：
+    - 仅复制扩展名为 .SUM 或 .txt 的文件；
+    - 文件名需包含任意一个 lot 名（不区分大小写）；
+    - 文件名包含 ENG 或 SPC（不区分大小写）则排除；
+    - 递归扫描 source_root 的所有子目录。
+    返回：每个 lot 的复制数量与目标目录。
+    """
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': '仅支持 POST'})
+    try:
+        body = json.loads(request.body or '{}')
+        lot_names = body.get('lot_names') or []
+        source_root = body.get('source_root')
+        if not isinstance(lot_names, list) or not lot_names:
+            return JsonResponse({'ok': False, 'error': '请提供至少一个 lot 名（数组）'})
+
+        # 规范化 lot 名列表：去重、去空格、转小写
+        norm_lots = []
+        seen = set()
+        for ln in lot_names:
+            s = str(ln or '').strip()
+            if not s:
+                continue
+            sl = s.lower()
+            if sl not in seen:
+                seen.add(sl)
+                norm_lots.append(sl)
+        if not norm_lots:
+            return JsonResponse({'ok': False, 'error': 'lot 名列表为空'})
+
+        src_root = _resolve_slt_summary_root(source_root)
+        if not src_root.exists() or not src_root.is_dir():
+            return JsonResponse({'ok': False, 'error': f'源目录不可访问：{src_root}. 请挂载共享盘或设置环境变量 SLT_SUMMARY_ROOT。'})
+
+        # 结果统计
+        stats = {ln: {'copied': 0, 'dest': str(LOTS_DIR / ln)} for ln in norm_lots}
+
+        # 递归扫描并复制
+        exclude_pat = ('eng', 'spc')
+        valid_ext = ('.sum', '.txt')
+        for root, _dirs, files in os.walk(src_root):
+            for fname in files:
+                lower = fname.lower()
+                # 扩展名过滤
+                if not lower.endswith(valid_ext):
+                    continue
+                # 排除 ENG/SPC
+                if any(k in lower for k in exclude_pat):
+                    continue
+                # lot 名包含判断
+                matched = None
+                for ln in norm_lots:
+                    if ln in lower:
+                        matched = ln
+                        break
+                if not matched:
+                    continue
+                src_file = Path(root) / fname
+                dest_dir = LOTS_DIR / matched
+                try:
+                    final_name = _copy_with_collision(src_file, dest_dir)
+                    stats[matched]['copied'] += 1
+                except Exception:
+                    # 忽略单个复制错误，继续扫描
+                    pass
+
+        return JsonResponse({'ok': True, 'stats': stats, 'source_root': str(src_root)})
+    except Exception as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)})
+
+
+@csrf_exempt
 def api_sum_run(request):
     """执行汇总，返回下载链接。"""
     if request.method != 'POST':
@@ -126,6 +243,8 @@ def api_sum_run(request):
     try:
         body = json.loads(request.body or '{}')
         lots_dir = body.get('lots_dir') or str(BASE_ROOT / 'lots')
+        use_tp_filter = bool(body.get('use_tp_filter'))
+        tp_name = (body.get('tp_name') or '').strip()
         abs_lots = _ensure_safe_path(lots_dir)
         if not abs_lots.exists() or not abs_lots.is_dir():
             return JsonResponse({'ok': False, 'error': 'lots 目录不存在'})
@@ -138,7 +257,8 @@ def api_sum_run(request):
         if not lot_subdirs:
             return JsonResponse({'ok': False, 'error': 'lots 目录下没有子目录'})
 
-        lot_summaries = [sa.aggregate_lot(ld) for ld in lot_subdirs]
+        tp_filter_value = (tp_name if use_tp_filter and tp_name else None)
+        lot_summaries = [sa.aggregate_lot(ld, tp_filter_value) for ld in lot_subdirs]
         df = sa.build_dataframe(lot_summaries)
         final_path = sa.write_excel(df, str(EXPORTS_DIR / 'result.xlsx'))
         rel_name = os.path.basename(final_path)
@@ -247,3 +367,64 @@ def api_sum_upload_run(request):
         return JsonResponse({'ok': True, 'filename': rel_name, 'download_url': f"/api/sum/download/{rel_name}", 'uploaded_files': count})
     except Exception as exc:
         return JsonResponse({'ok': False, 'error': str(exc)})
+
+
+@csrf_exempt
+def api_sum_clear(request):
+    """
+    删除 lots 目录下的子文件夹及其所有内容。
+
+    请求体（JSON）可选字段：
+    - lots_dir: 要清理的 lots 根目录，默认 'lots'（相对项目根）
+    - lot_names: 仅删除这些 lot 名对应的子目录（列表，可选，不区分大小写）
+
+    返回：
+    { ok: true, removed: [lot1, lot2], deleted_dirs: N, deleted_files: M, target: lots_dir }
+    """
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': '仅支持 POST'}, status=405)
+
+    try:
+        body = json.loads(request.body or '{}')
+    except Exception:
+        body = {}
+
+    lots_dir = body.get('lots_dir') or str(BASE_ROOT / 'lots')
+    try:
+        abs_lots = _ensure_safe_path(lots_dir)
+    except Exception as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)})
+
+    if not abs_lots.exists() or not abs_lots.is_dir():
+        return JsonResponse({'ok': True, 'removed': [], 'deleted_dirs': 0, 'deleted_files': 0, 'target': str(abs_lots)})
+
+    lot_names = body.get('lot_names') or []
+    norm_targets = [str(name).strip().lower() for name in lot_names if str(name).strip()] if lot_names else None
+
+    removed = []
+    deleted_dirs = 0
+    deleted_files = 0
+
+    for child in abs_lots.iterdir():
+        if not child.is_dir():
+            continue
+        lot_dir_name = child.name.lower()
+        if norm_targets is not None and lot_dir_name not in norm_targets:
+            continue
+        # 统计数量
+        for root, dirs, files in os.walk(child):
+            deleted_files += len(files)
+            deleted_dirs += len(dirs)
+        try:
+            shutil.rmtree(child)
+            removed.append(child.name)
+        except Exception as e:
+            return JsonResponse({'ok': False, 'error': f'移除 {child.name} 失败: {e}'}, status=500)
+
+    return JsonResponse({
+        'ok': True,
+        'removed': removed,
+        'deleted_dirs': deleted_dirs,
+        'deleted_files': deleted_files,
+        'target': str(abs_lots),
+    })

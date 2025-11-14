@@ -277,7 +277,7 @@ def _row_key(category: int, binv: int) -> str:
     return f"{category}_{binv}"
 
 
-def aggregate_lot(lot_dir: str) -> LotSummary:
+def aggregate_lot(lot_dir: str, tp_name_filter: Union[str, None] = None) -> LotSummary:
     lot_name = os.path.basename(lot_dir.rstrip(os.sep))
     # 允许 .SUM/.sum/.txt 扩展名
     candidates: List[str] = []
@@ -293,6 +293,21 @@ def aggregate_lot(lot_dir: str) -> LotSummary:
         raise ValueError(f"lot '{lot_name}' 下未找到 SUM 文件")
 
     files: List[SumFile] = [parse_sum_file(p) for p in candidates]
+    # 可选：按 Program ID（TpName）过滤
+    if tp_name_filter:
+        norm = str(tp_name_filter).strip().lower()
+        files = [f for f in files if str(f.tp_name or '').strip().lower() == norm]
+        # 若过滤后为空：返回 0 值占位汇总（该 lot 仍在列中显示为 0）
+        if not files:
+            return LotSummary(
+                lot_name=lot_name,
+                earliest_total=0,
+                total_pass_sum=0,
+                total_fail=0,
+                cells={},
+                tp_name="",
+            )
+
     earliest = min(files, key=lambda x: x.timestamp)
     latest = max(files, key=lambda x: x.timestamp)
 
@@ -390,7 +405,9 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
         df.at["Total", lt.lot_name] = lt.earliest_total
         total_row_sum += lt.earliest_total
     df.at["Total", "sum"] = total_row_sum
-    df.at["Total", "rate"] = f"{(total_row_sum / sum_total_across_lots) * 100:.2f}%"
+    df.at["Total", "rate"] = (
+        "0.00%" if sum_total_across_lots == 0 else f"{(total_row_sum / sum_total_across_lots) * 100:.2f}%"
+    )
     df.at["Total", "remark"] = ""
 
     # TotalPass
@@ -399,7 +416,9 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
         df.at["TotalPass", lt.lot_name] = lt.total_pass_sum
         total_pass_sum_all += lt.total_pass_sum
     df.at["TotalPass", "sum"] = total_pass_sum_all
-    df.at["TotalPass", "rate"] = f"{(total_pass_sum_all / sum_total_across_lots) * 100:.2f}%"
+    df.at["TotalPass", "rate"] = (
+        "0.00%" if sum_total_across_lots == 0 else f"{(total_pass_sum_all / sum_total_across_lots) * 100:.2f}%"
+    )
     df.at["TotalPass", "remark"] = ""
 
     # TotalFail（用 sum_total_across_lots - total_pass_sum_all 更稳）
@@ -407,7 +426,9 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
     for lt in lots:
         df.at["TotalFail", lt.lot_name] = lt.total_fail
     df.at["TotalFail", "sum"] = total_fail_sum_all
-    df.at["TotalFail", "rate"] = f"{(total_fail_sum_all / sum_total_across_lots) * 100:.2f}%"
+    df.at["TotalFail", "rate"] = (
+        "0.00%" if sum_total_across_lots == 0 else f"{(total_fail_sum_all / sum_total_across_lots) * 100:.2f}%"
+    )
     df.at["TotalFail", "remark"] = ""
 
     # 填充 Category_BIN 行
@@ -453,7 +474,9 @@ def build_dataframe(lots: List[LotSummary]) -> pd.DataFrame:
         else:
             numeric_sum = int(sum(int(v) for v in values))
             df.at[key, "sum"] = numeric_sum
-            df.at[key, "rate"] = f"{(numeric_sum / sum_total_across_lots) * 100:.2f}%"
+            df.at[key, "rate"] = (
+                "0.00%" if sum_total_across_lots == 0 else f"{(numeric_sum / sum_total_across_lots) * 100:.2f}%"
+            )
 
         # 构建按 lot 的 remark 状态并汇总到单列
         lot_status_msgs: List[str] = []

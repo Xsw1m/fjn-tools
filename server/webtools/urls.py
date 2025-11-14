@@ -22,6 +22,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', sum_views.index_static, name='index'),
     path('api/fs/list', sum_views.api_fs_list, name='api_fs_list'),
+    path('api/sum/prepare', sum_views.api_sum_prepare, name='api_sum_prepare'),
+    path('api/sum/clear', sum_views.api_sum_clear, name='api_sum_clear'),
     path('api/sum/run', sum_views.api_sum_run, name='api_sum_run'),
     path('api/sum/upload-run', sum_views.api_sum_upload_run, name='api_sum_upload_run'),
     re_path(r'^api/sum/download/(?P<filename>[^/]+)$', sum_views.api_sum_download, name='api_sum_download'),
