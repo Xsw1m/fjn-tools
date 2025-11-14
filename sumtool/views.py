@@ -3,6 +3,10 @@ import json
 import sys
 from pathlib import Path
 import shutil
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from django.http import HttpResponse, JsonResponse, FileResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -233,6 +237,184 @@ def api_sum_prepare(request):
         return JsonResponse({'ok': True, 'stats': stats, 'source_root': str(src_root)})
     except Exception as exc:
         return JsonResponse({'ok': False, 'error': str(exc)})
+
+
+# --------------------------
+# 异步准备：支持进度查询
+# --------------------------
+
+PREPARE_JOBS = {}
+
+class PrepareJob:
+    def __init__(self, job_id: str, norm_lots: list[str], src_root: Path):
+        self.job_id = job_id
+        self.norm_lots = norm_lots
+        self.src_root = src_root
+        self.stats = {ln: {'copied': 0, 'dest': str(LOTS_DIR / ln)} for ln in norm_lots}
+        self.scanned_files = 0
+        self.matched_files = 0
+        self.copied_files = 0
+        self.running = True
+        self.error = ""
+        self.start_ts = time.time()
+        self.end_ts = None
+        self._lock = threading.Lock()
+        self._cancel = False
+        self._thread = None
+
+    def to_dict(self):
+        with self._lock:
+            return {
+                'ok': True,
+                'job_id': self.job_id,
+                'running': self.running,
+                'error': self.error,
+                'stats': self.stats,
+                'scanned_files': self.scanned_files,
+                'matched_files': self.matched_files,
+                'copied_files': self.copied_files,
+                'elapsed_seconds': int((time.time() - self.start_ts) if self.start_ts else 0),
+                'source_root': str(self.src_root),
+            }
+
+    def cancel(self):
+        with self._lock:
+            self._cancel = True
+
+
+def _prepare_worker(job: PrepareJob):
+    exclude_pat = ('eng', 'spc')
+    valid_ext = ('.sum', '.txt')
+    try:
+        # 使用 os.scandir 提升目录遍历性能；复制阶段使用线程池并行 I/O
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            stack = [job.src_root]
+            while stack:
+                base = stack.pop()
+                try:
+                    with os.scandir(base) as it:
+                        for entry in it:
+                            if job._cancel:
+                                raise RuntimeError('用户取消')
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(Path(entry.path))
+                                continue
+                            if not entry.is_file(follow_symlinks=False):
+                                continue
+                            name = entry.name
+                            lower = name.lower()
+                            # 扩展名过滤
+                            if not lower.endswith(valid_ext):
+                                continue
+                            # 排除 ENG/SPC
+                            if any(k in lower for k in exclude_pat):
+                                continue
+                            matched = None
+                            for ln in job.norm_lots:
+                                if ln in lower:
+                                    matched = ln
+                                    break
+                            with job._lock:
+                                job.scanned_files += 1
+                            if not matched:
+                                continue
+                            with job._lock:
+                                job.matched_files += 1
+
+                            src_file = Path(entry.path)
+                            dest_dir = LOTS_DIR / matched
+
+                            def _copy_one(src=src_file, dest=dest_dir, ln=matched):
+                                try:
+                                    final_name = _copy_with_collision(src, dest)
+                                    with job._lock:
+                                        job.stats[ln]['copied'] += 1
+                                        job.copied_files += 1
+                                except Exception:
+                                    pass
+
+                            pool.submit(_copy_one)
+                except Exception:
+                    # 忽略单个目录的扫描错误，继续
+                    continue
+        with job._lock:
+            job.running = False
+            job.end_ts = time.time()
+    except Exception as exc:
+        with job._lock:
+            job.error = str(exc)
+            job.running = False
+            job.end_ts = time.time()
+
+
+@csrf_exempt
+def api_sum_prepare_start(request):
+    """启动异步准备任务，返回 job_id。"""
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': '仅支持 POST'})
+    try:
+        body = json.loads(request.body or '{}')
+    except Exception:
+        body = {}
+    lot_names = body.get('lot_names') or []
+    source_root = body.get('source_root')
+    if not isinstance(lot_names, list) or not lot_names:
+        return JsonResponse({'ok': False, 'error': '请提供至少一个 lot 名（数组）'})
+
+    # 规范化 lot 名列表：去重、去空格、转小写
+    norm_lots = []
+    seen = set()
+    for ln in lot_names:
+        s = str(ln or '').strip()
+        if not s:
+            continue
+        sl = s.lower()
+        if sl not in seen:
+            seen.add(sl)
+            norm_lots.append(sl)
+    if not norm_lots:
+        return JsonResponse({'ok': False, 'error': 'lot 名列表为空'})
+
+    src_root = _resolve_slt_summary_root(source_root)
+    if not src_root.exists() or not src_root.is_dir():
+        return JsonResponse({'ok': False, 'error': f'源目录不可访问：{src_root}. 请挂载共享盘或设置环境变量 SLT_SUMMARY_ROOT。'})
+
+    job_id = uuid.uuid4().hex
+    job = PrepareJob(job_id, norm_lots, src_root)
+    PREPARE_JOBS[job_id] = job
+    t = threading.Thread(target=_prepare_worker, args=(job,), daemon=True)
+    job._thread = t
+    t.start()
+    return JsonResponse({'ok': True, 'job_id': job_id})
+
+
+def _get_job(job_id: str) -> PrepareJob | None:
+    job = PREPARE_JOBS.get(job_id)
+    return job
+
+
+def api_sum_prepare_status(request):
+    job_id = request.GET.get('job') or ''
+    job = _get_job(job_id)
+    if not job:
+        return JsonResponse({'ok': False, 'error': 'job 不存在'})
+    return JsonResponse(job.to_dict())
+
+
+@csrf_exempt
+def api_sum_prepare_cancel(request):
+    if request.method != 'POST':
+        return JsonResponse({'ok': False, 'error': '仅支持 POST'})
+    try:
+        body = json.loads(request.body or '{}')
+    except Exception:
+        body = {}
+    job_id = body.get('job_id') or ''
+    job = _get_job(job_id)
+    if not job:
+        return JsonResponse({'ok': False, 'error': 'job 不存在'})
+    job.cancel()
+    return JsonResponse({'ok': True})
 
 
 @csrf_exempt

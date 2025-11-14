@@ -189,6 +189,9 @@
         const [lots, setLots] = useState([]);
         const [status, setStatus] = useState('');
         const [stats, setStats] = useState(null);
+        const [preparing, setPreparing] = useState(false);
+        const [prepareJobId, setPrepareJobId] = useState('');
+        const [progress, setProgress] = useState({ scanned: 0, matched: 0, copied: 0 });
         const addLot = () => {
           const v = (inputVal || '').trim();
           if (!v) return;
@@ -203,22 +206,41 @@
         };
         const startPrepare = async () => {
           if (!lots.length) { setStatus('请先添加至少一个 lot 名'); return; }
+          if (preparing) return;
+          setPreparing(true);
           setStatus('正在筛选并复制...'); setStats(null);
           try {
-            const res = await fetch('/api/sum/prepare', {
+            const res = await fetch('/api/sum/prepare/start', {
               method:'POST', headers:{'Content-Type':'application/json'},
               body: JSON.stringify({ lot_names: lots, source_root: sourceRoot })
             });
             const data = await res.json();
-            if (data.ok) {
-              setStats(data.stats || {});
-              const total = Object.values(data.stats || {}).reduce((s, v) => s + (v.copied||0), 0);
-              setStatus(`完成：共复制 ${total} 个文件到 lots/ 下`);
-            } else {
-              setStatus('失败：' + (data.error || '未知错误'));
-            }
+            if (!data.ok) { setPreparing(false); setStatus('失败：' + (data.error || '未知错误')); return; }
+            setPrepareJobId(data.job_id);
+            const timer = setInterval(async () => {
+              try {
+                const r = await fetch(`/api/sum/prepare/status?job=${encodeURIComponent(data.job_id)}`);
+                const s = await r.json();
+                if (!s.ok) { setStatus('失败：' + (s.error || '未知错误')); clearInterval(timer); setPreparing(false); return; }
+                setStats(s.stats || {});
+                setProgress({ scanned: s.scanned_files||0, matched: s.matched_files||0, copied: s.copied_files||0 });
+                if (!s.running) {
+                  clearInterval(timer);
+                  const total = Object.values(s.stats || {}).reduce((sum, v) => sum + (v.copied||0), 0);
+                  setStatus(`完成：共复制 ${total} 个文件到 lots/ 下，用时 ${s.elapsed_seconds}s`);
+                  setPreparing(false);
+                } else {
+                  setStatus(`正在筛选并复制... 已扫描 ${s.scanned_files}，匹配 ${s.matched_files}，复制 ${s.copied_files}`);
+                }
+              } catch (e) {
+                clearInterval(timer);
+                setStatus('失败：' + e.message);
+                setPreparing(false);
+              }
+            }, 1000);
           } catch (e) {
             setStatus('失败：' + e.message);
+            setPreparing(false);
           }
         };
         return (
@@ -249,10 +271,13 @@
               </div>
             )}
             <div style={{display:'flex',gap:10,marginTop:10}}>
-              <button onClick={startPrepare}>开始筛选复制</button>
+              <button onClick={startPrepare} disabled={preparing}>开始筛选复制</button>
               <a href="#/sum" style={{alignSelf:'center',color:'#2563eb',textDecoration:'none'}}>前往生成 xlsx →</a>
             </div>
             <div className="status">{status}</div>
+            {preparing && (
+              <div className="comment">进度：已扫描 {progress.scanned}｜匹配 {progress.matched}｜复制 {progress.copied}</div>
+            )}
             {stats && (
               <div style={{marginTop:10}}>
                 <div className="comment">复制结果：</div>
@@ -272,6 +297,9 @@
         const [lots, setLots] = useState([]);
         const [prepareStats, setPrepareStats] = useState(null);
         const [prepareStatus, setPrepareStatus] = useState('');
+        const [preparing, setPreparing] = useState(false);
+        const [prepareJobId, setPrepareJobId] = useState('');
+        const [progress, setProgress] = useState({ scanned: 0, matched: 0, copied: 0 });
         const [lotsPath, setLotsPath] = useState('lots');
         const [runStatus, setRunStatus] = useState('');
         const [downloadUrl, setDownloadUrl] = useState('');
@@ -294,27 +322,42 @@
         };
         const startPrepare = async () => {
           if (!lots.length) { setPrepareStatus('请先添加至少一个 lot 名'); return; }
+          if (preparing) return; // 禁止二次点击
+          setPreparing(true);
           setPrepareStatus('正在筛选并复制...'); setPrepareStats(null); setRunStatus(''); setDownloadUrl('');
           try {
-            const res = await fetch('/api/sum/prepare', {
+            const res = await fetch('/api/sum/prepare/start', {
               method:'POST', headers:{'Content-Type':'application/json'},
               body: JSON.stringify({ lot_names: lots, source_root: sourceRoot })
             });
             const data = await res.json();
-            if (data.ok) {
-              setPrepareStats(data.stats || {});
-              const total = Object.values(data.stats || {}).reduce((s, v) => s + (v.copied||0), 0);
-              setPrepareStatus(`完成：共复制 ${total} 个文件到 lots/ 下`);
-              setLotsPath('lots');
-              // 完成后允许进入下一步
-              if (total > 0) {
-                // 不自动跳转，交给用户点击“下一步”
+            if (!data.ok) { setPreparing(false); setPrepareStatus('失败：' + (data.error || '未知错误')); return; }
+            setPrepareJobId(data.job_id);
+            const timer = setInterval(async () => {
+              try {
+                const r = await fetch(`/api/sum/prepare/status?job=${encodeURIComponent(data.job_id)}`);
+                const s = await r.json();
+                if (!s.ok) { setPrepareStatus('失败：' + (s.error || '未知错误')); clearInterval(timer); setPreparing(false); return; }
+                setPrepareStats(s.stats || {});
+                setProgress({ scanned: s.scanned_files||0, matched: s.matched_files||0, copied: s.copied_files||0 });
+                if (!s.running) {
+                  clearInterval(timer);
+                  const total = Object.values(s.stats || {}).reduce((sum, v) => sum + (v.copied||0), 0);
+                  setPrepareStatus(`完成：共复制 ${total} 个文件到 lots/ 下，用时 ${s.elapsed_seconds}s`);
+                  setLotsPath('lots');
+                  setPreparing(false);
+                } else {
+                  setPrepareStatus(`正在筛选并复制... 已扫描 ${s.scanned_files}，匹配 ${s.matched_files}，复制 ${s.copied_files}`);
+                }
+              } catch (e) {
+                clearInterval(timer);
+                setPrepareStatus('失败：' + e.message);
+                setPreparing(false);
               }
-            } else {
-              setPrepareStatus('失败：' + (data.error || '未知错误'));
-            }
+            }, 1000);
           } catch (e) {
             setPrepareStatus('失败：' + e.message);
+            setPreparing(false);
           }
         };
         const run = async () => {
@@ -427,10 +470,13 @@
                   <button onClick={clearAllLots} className="secondary" title="删除 lots 下所有子目录及其内容">清除 lots</button>
                 </div>
                 <div style={{display:'flex',gap:10,marginTop:10}}>
-                  <button onClick={startPrepare}>开始筛选复制</button>
-                  <button onClick={()=>setStep(2)} disabled={!canNext}>下一步</button>
+                  <button onClick={startPrepare} disabled={preparing}>开始筛选复制</button>
+                  <button onClick={()=>setStep(2)} disabled={!canNext || preparing}>下一步</button>
                 </div>
                 <div className="status">{prepareStatus}</div>
+                {preparing && (
+                  <div className="comment">进度：已扫描 {progress.scanned}｜匹配 {progress.matched}｜复制 {progress.copied}</div>
+                )}
                 {prepareStats && (
                   <div style={{marginTop:10}}>
                     <div className="comment">复制结果：</div>
